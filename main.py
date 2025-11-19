@@ -9,13 +9,14 @@ import sqlite3
 import asyncio
 from datetime import datetime
 from typing import List, Optional, Dict, Any
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 
 from grading_engine import GradingEngine
+from file_parser import FileParser
 
 # 환경변수
 DATA_DIR = os.environ.get("DATA_DIR", ".")
@@ -53,14 +54,14 @@ class TaskUpdate(BaseModel):
 
 class PractitionerCreate(BaseModel):
     name: str
-    email: str
+    email: EmailStr  # 이메일 검증 추가
     department: Optional[str] = None
     position: Optional[str] = None
     years_of_experience: Optional[int] = None
 
 class PractitionerUpdate(BaseModel):
     name: Optional[str] = None
-    email: Optional[str] = None
+    email: Optional[EmailStr] = None  # 이메일 검증 추가
     department: Optional[str] = None
     position: Optional[str] = None
     years_of_experience: Optional[int] = None
@@ -716,6 +717,55 @@ async def get_task_dashboard(task_id: int):
         "submissions": submissions,
         "leaderboard": leaderboard
     }
+
+# ============================================================================
+# API: 파일 업로드
+# ============================================================================
+
+@app.post("/upload/parse")
+async def upload_and_parse_file(file: UploadFile = File(...)):
+    """
+    파일 업로드 및 파싱
+    PDF, TXT, Excel 파일 지원
+    """
+    try:
+        # 파일 확장자 확인
+        filename = file.filename or ""
+        if not filename:
+            raise HTTPException(status_code=400, detail="No filename provided")
+        
+        # 지원하는 파일 형식 확인
+        supported_extensions = ('.txt', '.pdf', '.xlsx', '.xls', '.csv')
+        if not filename.lower().endswith(supported_extensions):
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Unsupported file type. Supported: {', '.join(supported_extensions)}"
+            )
+        
+        # 파일 읽기
+        content = await file.read()
+        
+        # 파일 타입 감지
+        file_type = FileParser.detect_file_type(filename)
+        if not file_type:
+            raise HTTPException(status_code=400, detail="Unsupported file type")
+        
+        # 파일 파싱
+        success, parsed_text = FileParser.parse_file(content, file_type)
+        
+        if not success:
+            raise HTTPException(status_code=500, detail=f"File parsing failed: {parsed_text}")
+        
+        return {
+            "filename": filename,
+            "size": len(content),
+            "text": parsed_text,  # 프론트엔드에서 'text' 필드 사용
+            "content": parsed_text,  # 호환성
+            "preview": parsed_text[:500] + ("..." if len(parsed_text) > 500 else "")
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"File parsing failed: {str(e)}")
 
 # ============================================================================
 # 정적 파일 서빙

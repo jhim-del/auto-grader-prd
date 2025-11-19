@@ -583,7 +583,14 @@
                 
                 <div class="form-group">
                     <label>기대 출력 (정답) *</label>
-                    <textarea id="task-golden-output" required placeholder="프롬프트 실행 시 나와야 하는 기대 결과"></textarea>
+                    <div style="margin-bottom: 10px;">
+                        <input type="file" id="task-golden-file" accept=".pdf,.txt,.xlsx,.xls,.csv" style="display: none;" onchange="handleFileUpload(event)">
+                        <button type="button" class="btn btn-secondary" onclick="document.getElementById('task-golden-file').click()" style="margin-right: 10px;">
+                            📄 파일 업로드 (PDF/TXT/Excel)
+                        </button>
+                        <span id="file-upload-status" style="font-size: 12px; color: #666;"></span>
+                    </div>
+                    <textarea id="task-golden-output" required placeholder="프롬프트 실행 시 나와야 하는 기대 결과 (또는 위 파일 업로드 버튼 사용)"></textarea>
                 </div>
                 
                 <div class="form-group">
@@ -794,6 +801,45 @@
                 document.getElementById('task-modal-title').textContent = '과제 수정';
             } catch (error) {
                 alert('과제 정보 로딩 실패');
+            }
+        }
+        
+        // 파일 업로드 처리
+        async function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            const statusEl = document.getElementById('file-upload-status');
+            statusEl.textContent = '업로드 중...';
+            statusEl.style.color = '#FA0030';
+            
+            try {
+                const formData = new FormData();
+                formData.append('file', file);
+                
+                const response = await fetch(`${API_BASE}/upload/parse`, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || '파일 업로드 실패');
+                }
+                
+                const result = await response.json();
+                document.getElementById('task-golden-output').value = result.text || result.content;
+                
+                statusEl.textContent = `✅ ${file.name} 업로드 성공`;
+                statusEl.style.color = '#28a745';
+                
+                setTimeout(() => {
+                    statusEl.textContent = '';
+                }, 3000);
+            } catch (error) {
+                statusEl.textContent = `❌ 오류: ${error.message}`;
+                statusEl.style.color = '#dc3545';
+                console.error('File upload error:', error);
             }
         }
         
