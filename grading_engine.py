@@ -15,12 +15,8 @@ class GradingEngine:
     """PRD 준수 자동 채점 엔진"""
     
     def __init__(self, api_key: str, model: str = "gpt-4o-mini"):
-        # OpenAI 클라이언트 초기화 (최신 버전 호환성)
-        self.client = OpenAI(
-            api_key=api_key,
-            max_retries=3,
-            timeout=60.0
-        )
+        # OpenAI 클라이언트 초기화
+        self.client = OpenAI(api_key=api_key)
         self.model = model
         
         # PRD NFR2: 평가 시 temperature=0
