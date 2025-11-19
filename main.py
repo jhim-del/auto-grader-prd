@@ -13,8 +13,10 @@ from typing import List, Optional, Dict, Any
 from fastapi import FastAPI, HTTPException, BackgroundTasks, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
+import secrets
+from typing import Dict
 
 from grading_engine import GradingEngine
 from file_parser import FileParser
@@ -27,6 +29,12 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 # 채점 진행 상황 추적 (메모리에 저장)
 grading_progress = {}
 # 구조: {submission_id: {status, current_step, progress, details, execution_count, ...}}
+
+# 관리자 인증
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123")  # 기본값, 환경변수로 변경 권장
+admin_sessions: Dict[str, float] = {}  # {token: timestamp}
+SESSION_TIMEOUT = 3600 * 8  # 8시간
+
 
 app = FastAPI(title="Auto-Grader v3.0 - 완전한 관리 시스템")
 
@@ -67,6 +75,13 @@ class SubmissionCreate(BaseModel):
     task_id: int
     practitioner_id: int
     prompt_text: str
+
+
+class AdminLoginRequest(BaseModel):
+    password: str
+
+class ParticipantCheckRequest(BaseModel):
+    name: str
 
 class SubmissionUpdate(BaseModel):
     prompt_text: Optional[str] = None

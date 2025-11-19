@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>프롬프트 경진대회 - 제출</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif;
+            background: linear-gradient(135deg, #FED3DB 0%, #D4F3FC 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 24px;
+            box-shadow: 0 20px 60px rgba(250, 0, 48, 0.15);
+            max-width: 600px;
+            width: 100%;
+            padding: 40px;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+        
+        .header h1 {
+            color: #FA0030;
+            font-size: 32px;
+            margin-bottom: 8px;
+        }
+        
+        .header p {
+            color: #666;
+            font-size: 16px;
+        }
+        
+        .form-group {
+            margin-bottom: 24px;
+        }
+        
+        .form-group label {
+            display: block;
+            color: #333;
+            font-weight: 600;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+        
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #D2D5D9;
+            border-radius: 12px;
+            font-size: 14px;
+            font-family: inherit;
+            transition: all 0.3s;
+        }
+        
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #FA0030;
+            box-shadow: 0 0 0 3px rgba(250, 0, 48, 0.1);
+        }
+        
+        .form-group textarea {
+            min-height: 200px;
+            resize: vertical;
+            font-family: 'Courier New', monospace;
+        }
+        
+        .character-count {
+            text-align: right;
+            font-size: 12px;
+            color: #999;
+            margin-top: 4px;
+        }
+        
+        .submit-btn {
+            width: 100%;
+            padding: 16px;
+            background: linear-gradient(135deg, #FA0030 0%, #850028 100%);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .submit-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(250, 0, 48, 0.3);
+        }
+        
+        .submit-btn:disabled {
+            background: #D2D5D9;
+            cursor: not-allowed;
+        }
+        
+        .admin-link {
+            text-align: center;
+            margin-top: 24px;
+        }
+        
+        .admin-link a {
+            color: #93E6F5;
+            text-decoration: none;
+            font-size: 13px;
+            transition: color 0.3s;
+        }
+        
+        .admin-link a:hover {
+            color: #FA0030;
+        }
+        
+        .alert {
+            padding: 16px;
+            border-radius: 12px;
+            margin-bottom: 24px;
+            font-size: 14px;
+        }
+        
+        .alert-success {
+            background: #e8f5e9;
+            color: #2e7d32;
+            border: 1px solid #81c784;
+        }
+        
+        .alert-error {
+            background: #ffebee;
+            color: #c62828;
+            border: 1px solid #ef5350;
+        }
+        
+        .alert-info {
+            background: #e3f2fd;
+            color: #1565c0;
+            border: 1px solid #64b5f6;
+        }
+        
+        .info-box {
+            background: #D4F3FC;
+            border-left: 4px solid #93E6F5;
+            padding: 16px;
+            border-radius: 8px;
+            margin-bottom: 24px;
+            font-size: 13px;
+            color: #333;
+        }
+        
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+        
+        .loading.show {
+            display: block;
+        }
+        
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #FA0030;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .task-info {
+            background: #FED3DB;
+            padding: 12px;
+            border-radius: 8px;
+            margin-top: 8px;
+            font-size: 13px;
+            color: #850028;
+            display: none;
+        }
+        
+        .task-info.show {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🏆 프롬프트 경진대회</h1>
+            <p>프롬프트를 제출하고 자동 평가를 받으세요</p>
+        </div>
+        
+        <div id="alert-container"></div>
+        
+        <div class="info-box">
+            ℹ️ <strong>제출 안내</strong><br>
+            • 이름과 과제를 선택하고 프롬프트를 작성하세요<br>
+            • 제출은 <strong>1회만 가능</strong>하며 수정할 수 없습니다<br>
+            • 제출 후 관리자가 채점을 진행합니다
+        </div>
+        
+        <form id="submission-form">
+            <div class="form-group">
+                <label for="name">이름 *</label>
+                <input 
+                    type="text" 
+                    id="name" 
+                    name="name" 
+                    placeholder="홍길동" 
+                    required
+                    maxlength="50"
+                >
+            </div>
+            
+            <div class="form-group">
+                <label for="task">과제 선택 *</label>
+                <select id="task" name="task" required>
+                    <option value="">과제를 선택하세요</option>
+                </select>
+                <div id="task-info" class="task-info"></div>
+            </div>
+            
+            <div class="form-group">
+                <label for="prompt">프롬프트 *</label>
+                <textarea 
+                    id="prompt" 
+                    name="prompt" 
+                    placeholder="여기에 프롬프트를 작성하세요..."
+                    required
+                    maxlength="5000"
+                ></textarea>
+                <div class="character-count">
+                    <span id="char-count">0</span> / 5,000자
+                </div>
+            </div>
+            
+            <button type="submit" class="submit-btn" id="submit-btn">
+                제출하기
+            </button>
+        </form>
+        
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p>제출 중입니다...</p>
+        </div>
+        
+        <div class="admin-link">
+            <a href="/admin/login">관리자 로그인</a>
+        </div>
+    </div>
+    
+    <script>
+        const API_BASE = '';
+        
+        // 과제 목록 로드
+        async function loadTasks() {
+            try {
+                const response = await fetch(`${API_BASE}/tasks`);
+                const tasks = await response.json();
+                
+                const taskSelect = document.getElementById('task');
+                tasks.forEach(task => {
+                    const option = document.createElement('option');
+                    option.value = task.id;
+                    option.textContent = task.title;
+                    option.dataset.description = task.description;
+                    taskSelect.appendChild(option);
+                });
+            } catch (error) {
+                showAlert('과제 목록을 불러오지 못했습니다.', 'error');
+            }
+        }
+        
+        // 과제 선택 시 설명 표시
+        document.getElementById('task').addEventListener('change', function() {
+            const taskInfo = document.getElementById('task-info');
+            const selectedOption = this.options[this.selectedIndex];
+            
+            if (selectedOption.dataset.description) {
+                taskInfo.textContent = selectedOption.dataset.description;
+                taskInfo.classList.add('show');
+            } else {
+                taskInfo.classList.remove('show');
+            }
+        });
+        
+        // 글자 수 카운터
+        document.getElementById('prompt').addEventListener('input', function() {
+            document.getElementById('char-count').textContent = this.value.length;
+        });
+        
+        // 폼 제출
+        document.getElementById('submission-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const name = document.getElementById('name').value.trim();
+            const taskId = document.getElementById('task').value;
+            const prompt = document.getElementById('prompt').value.trim();
+            
+            if (!name || !taskId || !prompt) {
+                showAlert('모든 필드를 입력해주세요.', 'error');
+                return;
+            }
+            
+            // 제출 확인
+            if (!confirm('제출하시겠습니까?\n\n⚠️ 제출 후에는 수정할 수 없습니다.')) {
+                return;
+            }
+            
+            // 로딩 표시
+            document.getElementById('submission-form').style.display = 'none';
+            document.getElementById('loading').classList.add('show');
+            
+            try {
+                // 1. 참가자 등록 또는 확인
+                const practitionerResponse = await fetch(`${API_BASE}/participants/check`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({name: name})
+                });
+                
+                const practitionerData = await practitionerResponse.json();
+                
+                // 이미 제출한 이력 확인
+                if (practitionerData.already_submitted) {
+                    const submittedTasks = practitionerData.submitted_tasks || [];
+                    if (submittedTasks.includes(parseInt(taskId))) {
+                        showAlert('이미 이 과제에 제출하셨습니다.\n제출은 1회만 가능합니다.', 'error');
+                        document.getElementById('submission-form').style.display = 'block';
+                        document.getElementById('loading').classList.remove('show');
+                        return;
+                    }
+                }
+                
+                const practitionerId = practitionerData.id;
+                
+                // 2. 제출물 생성
+                const submissionResponse = await fetch(`${API_BASE}/submissions`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        task_id: parseInt(taskId),
+                        practitioner_id: practitionerId,
+                        prompt_text: prompt
+                    })
+                });
+                
+                if (!submissionResponse.ok) {
+                    throw new Error('제출에 실패했습니다.');
+                }
+                
+                const submissionData = await submissionResponse.json();
+                
+                // 성공 메시지
+                document.getElementById('loading').classList.remove('show');
+                showAlert(
+                    `✅ 제출이 완료되었습니다!\n\n제출 번호: #${submissionData.id}\n관리자가 채점을 진행합니다.`,
+                    'success'
+                );
+                
+                // 폼 비활성화
+                document.getElementById('submit-btn').disabled = true;
+                document.getElementById('submit-btn').textContent = '제출 완료';
+                
+            } catch (error) {
+                document.getElementById('submission-form').style.display = 'block';
+                document.getElementById('loading').classList.remove('show');
+                showAlert('제출 중 오류가 발생했습니다: ' + error.message, 'error');
+            }
+        });
+        
+        // 알림 표시
+        function showAlert(message, type) {
+            const container = document.getElementById('alert-container');
+            const alert = document.createElement('div');
+            alert.className = `alert alert-${type}`;
+            alert.textContent = message;
+            alert.style.whiteSpace = 'pre-line';
+            container.innerHTML = '';
+            container.appendChild(alert);
+            
+            // 5초 후 자동 제거 (성공 메시지는 제외)
+            if (type !== 'success') {
+                setTimeout(() => {
+                    alert.remove();
+                }, 5000);
+            }
+        }
+        
+        // 초기화
+        loadTasks();
+    </script>
+</body>
+</html>
