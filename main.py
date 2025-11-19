@@ -528,11 +528,20 @@ async def grade_submission_background(submission_id: int):
         
         # 2단계: 마스터 평가
         grading_progress[submission_id].update({"status": "step2", "current_step": "2단계: 평가", "progress": 70, "details": "마스터 평가 중...", "execution_count": 3, "updated_at": time.time()})
-        grading_result = engine.grade_with_master_prompt(
+        success, grading_result, error_msg = engine.evaluate_outputs(
             submission['prompt_text'],
             outputs,
             submission['golden_output']
         )
+        
+        if not success:
+            c.execute("""
+                UPDATE submissions 
+                SET status = 'failed', grading_result = ? 
+                WHERE id = ?
+            """, (json.dumps({"error": error_msg}), submission_id))
+            conn.commit()
+            return
         
         # 채점 결과 저장
         c.execute("""

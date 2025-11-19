@@ -14,7 +14,7 @@ from openai import OpenAI
 class GradingEngine:
     """PRD 준수 자동 채점 엔진"""
     
-    def __init__(self, api_key: str, model: str = "gpt-4o-mini"):
+    def __init__(self, api_key: str, model: str = "gpt-3.5-turbo"):
         # Railway 환경의 프록시 설정 문제 해결: 환경변수 제거
         os.environ.pop('HTTP_PROXY', None)
         os.environ.pop('HTTPS_PROXY', None)
@@ -64,7 +64,7 @@ class GradingEngine:
                 return False, [], f"Execution {attempt+1} failed: {error}"
             
             outputs.append(output)
-            time.sleep(0.5)  # Rate limiting
+            # time.sleep(0.5)  # Rate limiting removed for speed
         
         return True, outputs, None
     
@@ -87,7 +87,7 @@ class GradingEngine:
                         {"role": "user", "content": prompt}
                     ],
                     temperature=self.execution_temperature,
-                    max_tokens=4000
+                    max_tokens=2000
                 )
                 
                 output = response.choices[0].message.content
