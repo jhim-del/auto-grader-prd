@@ -656,13 +656,19 @@ async def get_task_dashboard(task_id: int):
     leaderboard = []
     for sub in submissions:
         if sub['status'] == 'completed' and sub['grading_result']:
+            # detailed_criteria에서 점수 추출
+            criteria = sub['grading_result'].get('detailed_criteria', [])
+            accuracy = next((c['score'] for c in criteria if c['criterion'] == '정확성'), 0)
+            clarity = next((c['score'] for c in criteria if c['criterion'] == '명확성'), 0)
+            consistency = next((c['score'] for c in criteria if c['criterion'] == '완성도'), 0)
+            
             leaderboard.append({
                 "submission_id": sub['id'],
                 "practitioner_name": sub['practitioner_name'],
-                "total_score": sub['grading_result'].get('total_score', 0),
-                "accuracy_score": sub['grading_result'].get('accuracy_score', 0),
-                "clarity_score": sub['grading_result'].get('clarity_score', 0),
-                "consistency_score": sub['grading_result'].get('consistency_score', 0),
+                "total_score": sub['grading_result'].get('overall_score', 0),
+                "accuracy_score": accuracy,
+                "clarity_score": clarity,
+                "consistency_score": consistency,
                 "graded_at": sub['graded_at']
             })
     
