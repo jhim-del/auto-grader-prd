@@ -345,8 +345,7 @@ async def bulk_upload_submissions(
             if practitioner:
                 practitioner_id = practitioner['id']
             else:
-                c.execute("INSERT INTO practitioners (name, email, company) VALUES (?, ?, ?)",
-                         (name, "auto@generated.com", "참가자"))
+                c.execute("INSERT INTO practitioners (name) VALUES (?)", (name,))
                 practitioner_id = c.lastrowid
             
             # 제출물 생성
