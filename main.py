@@ -1,6 +1,6 @@
 """
 프롬프트 경진대회 자동 평가 플랫폼 v3.0
-완전한 관리 시스템 - 사용자가 모든 설정 가능
+엑셀 일괄 업로드 방식
 """
 
 import os
@@ -13,10 +13,10 @@ from typing import List, Optional, Dict, Any
 from fastapi import FastAPI, HTTPException, BackgroundTasks, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
-import secrets
-from typing import Dict
+import pandas as pd
+import io
 
 from grading_engine import GradingEngine
 from file_parser import FileParser
@@ -28,15 +28,8 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
 # 채점 진행 상황 추적 (메모리에 저장)
 grading_progress = {}
-# 구조: {submission_id: {status, current_step, progress, details, execution_count, ...}}
 
-# 관리자 인증
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123")  # 기본값, 환경변수로 변경 권장
-admin_sessions: Dict[str, float] = {}  # {token: timestamp}
-SESSION_TIMEOUT = 3600 * 8  # 8시간
-
-
-app = FastAPI(title="Auto-Grader v3.0 - 완전한 관리 시스템")
+app = FastAPI(title="Auto-Grader v3.0 - 엑셀 일괄 업로드")
 
 # CORS 설정
 app.add_middleware(
@@ -66,22 +59,15 @@ class TaskUpdate(BaseModel):
     evaluation_notes: Optional[str] = None
 
 class PractitionerCreate(BaseModel):
-    name: str  # 이름만 필요
+    name: str
 
 class PractitionerUpdate(BaseModel):
-    name: Optional[str] = None  # 이름만 수정 가능
+    name: Optional[str] = None
 
 class SubmissionCreate(BaseModel):
     task_id: int
     practitioner_id: int
     prompt_text: str
-
-
-class AdminLoginRequest(BaseModel):
-    password: str
-
-class ParticipantCheckRequest(BaseModel):
-    name: str
 
 class SubmissionUpdate(BaseModel):
     prompt_text: Optional[str] = None
@@ -98,80 +84,82 @@ def get_db():
 
 def init_db():
     """DB 초기화"""
-    conn = get_db()
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     
-    # practitioners 테이블 (이름만)
+    # practitioners 테이블
     c.execute("""
-    CREATE TABLE IF NOT EXISTS practitioners (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
+        CREATE TABLE IF NOT EXISTS practitioners (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            email TEXT,
+            company TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
     """)
     
     # tasks 테이블
     c.execute("""
-    CREATE TABLE IF NOT EXISTS tasks (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        title TEXT NOT NULL,
-        description TEXT,
-        input_data TEXT,
-        golden_output TEXT,
-        evaluation_notes TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
+        CREATE TABLE IF NOT EXISTS tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            description TEXT,
+            input_data TEXT NOT NULL,
+            golden_output TEXT NOT NULL,
+            evaluation_notes TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
     """)
     
     # submissions 테이블
     c.execute("""
-    CREATE TABLE IF NOT EXISTS submissions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        task_id INTEGER NOT NULL,
-        practitioner_id INTEGER NOT NULL,
-        prompt_text TEXT NOT NULL,
-        status TEXT DEFAULT 'submitted',
-        execution_output_1 TEXT,
-        execution_output_2 TEXT,
-        execution_output_3 TEXT,
-        grading_result TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        graded_at TIMESTAMP,
-        FOREIGN KEY (task_id) REFERENCES tasks(id),
-        FOREIGN KEY (practitioner_id) REFERENCES practitioners(id)
-    )
+        CREATE TABLE IF NOT EXISTS submissions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            practitioner_id INTEGER NOT NULL,
+            task_id INTEGER NOT NULL,
+            prompt_text TEXT NOT NULL,
+            submission_date TEXT DEFAULT CURRENT_TIMESTAMP,
+            score REAL,
+            grading_result TEXT,
+            graded_at TEXT,
+            FOREIGN KEY (practitioner_id) REFERENCES practitioners (id),
+            FOREIGN KEY (task_id) REFERENCES tasks (id)
+        )
     """)
     
     conn.commit()
     conn.close()
 
 # ============================================================================
-# 시작 이벤트
+# 라우트
 # ============================================================================
 
 @app.on_event("startup")
 async def startup():
-    """서버 시작 시 DB 초기화"""
     init_db()
-    print(f"✅ Database initialized at {DB_PATH}")
+
+@app.get("/")
+async def read_root():
+    """메인 페이지"""
+    return FileResponse("static/index.html")
 
 # ============================================================================
-# API: 과제 관리
+# 과제(Task) API
 # ============================================================================
 
 @app.get("/tasks")
 async def get_tasks():
-    """모든 과제 조회"""
+    """과제 목록 조회"""
     conn = get_db()
     c = conn.cursor()
-    c.execute("SELECT * FROM tasks ORDER BY created_at DESC")
+    c.execute("SELECT * FROM tasks ORDER BY id")
     tasks = [dict(row) for row in c.fetchall()]
     conn.close()
     return tasks
 
 @app.get("/tasks/{task_id}")
 async def get_task(task_id: int):
-    """특정 과제 조회"""
+    """과제 상세 조회"""
     conn = get_db()
     c = conn.cursor()
     c.execute("SELECT * FROM tasks WHERE id = ?", (task_id,))
@@ -179,66 +167,90 @@ async def get_task(task_id: int):
     conn.close()
     
     if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise HTTPException(status_code=404, detail="과제를 찾을 수 없습니다")
     
     return dict(task)
 
 @app.post("/tasks")
-async def create_task(task: TaskCreate):
-    """과제 생성"""
+async def create_task_with_files(
+    title: str = Form(...),
+    description: str = Form(None),
+    evaluation_notes: str = Form(None),
+    input_file: UploadFile = File(...),
+    output_file: UploadFile = File(...)
+):
+    """과제 생성 (파일 업로드)"""
+    
+    # 입력 데이터 파싱
+    input_content = await input_file.read()
+    input_data = FileParser.parse_file(input_content, input_file.filename)
+    
+    # 기대 출력 파싱
+    output_content = await output_file.read()
+    golden_output = FileParser.parse_file(output_content, output_file.filename)
+    
+    # DB 저장
     conn = get_db()
     c = conn.cursor()
-    
     c.execute("""
         INSERT INTO tasks (title, description, input_data, golden_output, evaluation_notes)
         VALUES (?, ?, ?, ?, ?)
-    """, (task.title, task.description, task.input_data, task.golden_output, task.evaluation_notes))
+    """, (title, description, input_data, golden_output, evaluation_notes))
     
     task_id = c.lastrowid
     conn.commit()
     conn.close()
     
-    return {"id": task_id, "message": "Task created successfully"}
+    return {"id": task_id, "message": "과제가 생성되었습니다"}
 
 @app.put("/tasks/{task_id}")
-async def update_task(task_id: int, task: TaskUpdate):
-    """과제 수정"""
+async def update_task_with_files(
+    task_id: int,
+    title: str = Form(None),
+    description: str = Form(None),
+    evaluation_notes: str = Form(None),
+    input_file: UploadFile = File(None),
+    output_file: UploadFile = File(None)
+):
+    """과제 수정 (파일 업로드)"""
+    
     conn = get_db()
     c = conn.cursor()
     
-    # 존재 확인
-    c.execute("SELECT id FROM tasks WHERE id = ?", (task_id,))
-    if not c.fetchone():
+    # 기존 과제 확인
+    c.execute("SELECT * FROM tasks WHERE id = ?", (task_id,))
+    task = c.fetchone()
+    if not task:
         conn.close()
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise HTTPException(status_code=404, detail="과제를 찾을 수 없습니다")
     
-    # 수정할 필드만 업데이트
-    updates = []
-    values = []
+    # 수정할 필드 준비
+    updates = {}
+    if title is not None:
+        updates['title'] = title
+    if description is not None:
+        updates['description'] = description
+    if evaluation_notes is not None:
+        updates['evaluation_notes'] = evaluation_notes
     
-    if task.title is not None:
-        updates.append("title = ?")
-        values.append(task.title)
-    if task.description is not None:
-        updates.append("description = ?")
-        values.append(task.description)
-    if task.input_data is not None:
-        updates.append("input_data = ?")
-        values.append(task.input_data)
-    if task.golden_output is not None:
-        updates.append("golden_output = ?")
-        values.append(task.golden_output)
-    if task.evaluation_notes is not None:
-        updates.append("evaluation_notes = ?")
-        values.append(task.evaluation_notes)
+    # 파일이 업로드된 경우 파싱
+    if input_file is not None:
+        input_content = await input_file.read()
+        updates['input_data'] = FileParser.parse_file(input_content, input_file.filename)
     
+    if output_file is not None:
+        output_content = await output_file.read()
+        updates['golden_output'] = FileParser.parse_file(output_content, output_file.filename)
+    
+    # 업데이트 쿼리 생성
     if updates:
-        values.append(task_id)
-        c.execute(f"UPDATE tasks SET {', '.join(updates)} WHERE id = ?", values)
+        set_clause = ", ".join([f"{k} = ?" for k in updates.keys()])
+        values = list(updates.values()) + [task_id]
+        c.execute(f"UPDATE tasks SET {set_clause} WHERE id = ?", values)
         conn.commit()
     
     conn.close()
-    return {"message": "Task updated successfully"}
+    return {"message": "과제가 수정되었습니다"}
 
 @app.delete("/tasks/{task_id}")
 async def delete_task(task_id: int):
@@ -246,35 +258,136 @@ async def delete_task(task_id: int):
     conn = get_db()
     c = conn.cursor()
     
-    # 연결된 제출물 먼저 삭제
-    c.execute("DELETE FROM submissions WHERE task_id = ?", (task_id,))
-    c.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
-    
-    if c.rowcount == 0:
+    # 과제 존재 확인
+    c.execute("SELECT * FROM tasks WHERE id = ?", (task_id,))
+    if not c.fetchone():
         conn.close()
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise HTTPException(status_code=404, detail="과제를 찾을 수 없습니다")
+    
+    # 관련 제출물 삭제
+    c.execute("DELETE FROM submissions WHERE task_id = ?", (task_id,))
+    
+    # 과제 삭제
+    c.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
     
     conn.commit()
     conn.close()
-    return {"message": "Task deleted successfully"}
+    
+    return {"message": "과제가 삭제되었습니다"}
 
 # ============================================================================
-# API: 참가자 관리
+# 참가자 및 제출물 일괄 업로드 API
+# ============================================================================
+
+@app.post("/bulk-upload")
+async def bulk_upload_submissions(
+    task_id: int = Form(...),
+    excel_file: UploadFile = File(...)
+):
+    """
+    엑셀 파일로 참가자+제출물 일괄 업로드
+    
+    엑셀 형식:
+    1행: 이름 | 프롬프트
+    2행~: 홍길동 | 프롬프트 내용...
+    """
+    
+    # 과제 존재 확인
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT * FROM tasks WHERE id = ?", (task_id,))
+    task = c.fetchone()
+    if not task:
+        conn.close()
+        raise HTTPException(status_code=404, detail="과제를 찾을 수 없습니다")
+    
+    # 엑셀 파일 읽기
+    try:
+        content = await excel_file.read()
+        df = pd.read_excel(io.BytesIO(content))
+        
+        # 컬럼명 확인 (1행: 이름, 프롬프트)
+        if len(df.columns) < 2:
+            raise HTTPException(status_code=400, detail="엑셀 파일에 최소 2개 컬럼(이름, 프롬프트)이 필요합니다")
+        
+        # 첫 2개 컬럼만 사용
+        df = df.iloc[:, :2]
+        df.columns = ['이름', '프롬프트']
+        
+        # 빈 행 제거
+        df = df.dropna(subset=['이름', '프롬프트'])
+        
+        if len(df) == 0:
+            raise HTTPException(status_code=400, detail="업로드할 데이터가 없습니다")
+        
+    except Exception as e:
+        conn.close()
+        raise HTTPException(status_code=400, detail=f"엑셀 파일 읽기 실패: {str(e)}")
+    
+    # 일괄 등록
+    created_count = 0
+    skipped_count = 0
+    errors = []
+    
+    for idx, row in df.iterrows():
+        try:
+            name = str(row['이름']).strip()
+            prompt = str(row['프롬프트']).strip()
+            
+            if not name or not prompt:
+                skipped_count += 1
+                continue
+            
+            # 참가자 존재 확인 또는 생성
+            c.execute("SELECT id FROM practitioners WHERE name = ?", (name,))
+            practitioner = c.fetchone()
+            
+            if practitioner:
+                practitioner_id = practitioner['id']
+            else:
+                c.execute("INSERT INTO practitioners (name, email, company) VALUES (?, ?, ?)",
+                         (name, "auto@generated.com", "참가자"))
+                practitioner_id = c.lastrowid
+            
+            # 제출물 생성
+            c.execute("""
+                INSERT INTO submissions (practitioner_id, task_id, prompt_text, submission_date)
+                VALUES (?, ?, ?, ?)
+            """, (practitioner_id, task_id, prompt, datetime.now().isoformat()))
+            
+            created_count += 1
+            
+        except Exception as e:
+            errors.append(f"행 {idx+2}: {str(e)}")
+            skipped_count += 1
+    
+    conn.commit()
+    conn.close()
+    
+    return {
+        "message": "일괄 업로드 완료",
+        "created": created_count,
+        "skipped": skipped_count,
+        "errors": errors if errors else None
+    }
+
+# ============================================================================
+# 참가자(Practitioner) API
 # ============================================================================
 
 @app.get("/practitioners")
 async def get_practitioners():
-    """모든 참가자 조회"""
+    """참가자 목록 조회"""
     conn = get_db()
     c = conn.cursor()
-    c.execute("SELECT * FROM practitioners ORDER BY created_at DESC")
+    c.execute("SELECT * FROM practitioners ORDER BY id")
     practitioners = [dict(row) for row in c.fetchall()]
     conn.close()
     return practitioners
 
 @app.get("/practitioners/{practitioner_id}")
 async def get_practitioner(practitioner_id: int):
-    """특정 참가자 조회"""
+    """참가자 상세 조회"""
     conn = get_db()
     c = conn.cursor()
     c.execute("SELECT * FROM practitioners WHERE id = ?", (practitioner_id,))
@@ -282,7 +395,7 @@ async def get_practitioner(practitioner_id: int):
     conn.close()
     
     if not practitioner:
-        raise HTTPException(status_code=404, detail="Practitioner not found")
+        raise HTTPException(status_code=404, detail="참가자를 찾을 수 없습니다")
     
     return dict(practitioner)
 
@@ -291,17 +404,16 @@ async def create_practitioner(practitioner: PractitionerCreate):
     """참가자 생성"""
     conn = get_db()
     c = conn.cursor()
-    
     c.execute("""
-        INSERT INTO practitioners (name)
-        VALUES (?)
-    """, (practitioner.name,))
+        INSERT INTO practitioners (name, email, company)
+        VALUES (?, ?, ?)
+    """, (practitioner.name, "auto@generated.com", "참가자"))
     
     practitioner_id = c.lastrowid
     conn.commit()
     conn.close()
     
-    return {"id": practitioner_id, "message": "Practitioner created successfully"}
+    return {"id": practitioner_id, "message": "참가자가 생성되었습니다"}
 
 @app.put("/practitioners/{practitioner_id}")
 async def update_practitioner(practitioner_id: int, practitioner: PractitionerUpdate):
@@ -309,19 +421,21 @@ async def update_practitioner(practitioner_id: int, practitioner: PractitionerUp
     conn = get_db()
     c = conn.cursor()
     
-    # 존재 확인
-    c.execute("SELECT id FROM practitioners WHERE id = ?", (practitioner_id,))
+    # 참가자 존재 확인
+    c.execute("SELECT * FROM practitioners WHERE id = ?", (practitioner_id,))
     if not c.fetchone():
         conn.close()
-        raise HTTPException(status_code=404, detail="Practitioner not found")
+        raise HTTPException(status_code=404, detail="참가자를 찾을 수 없습니다")
     
-    # 이름만 업데이트
+    # 수정
     if practitioner.name is not None:
-        c.execute("UPDATE practitioners SET name = ? WHERE id = ?", (practitioner.name, practitioner_id))
-        conn.commit()
+        c.execute("UPDATE practitioners SET name = ? WHERE id = ?",
+                 (practitioner.name, practitioner_id))
     
+    conn.commit()
     conn.close()
-    return {"message": "Practitioner updated successfully"}
+    
+    return {"message": "참가자가 수정되었습니다"}
 
 @app.delete("/practitioners/{practitioner_id}")
 async def delete_practitioner(practitioner_id: int):
@@ -329,69 +443,63 @@ async def delete_practitioner(practitioner_id: int):
     conn = get_db()
     c = conn.cursor()
     
-    # 연결된 제출물 먼저 삭제
-    c.execute("DELETE FROM submissions WHERE practitioner_id = ?", (practitioner_id,))
-    c.execute("DELETE FROM practitioners WHERE id = ?", (practitioner_id,))
-    
-    if c.rowcount == 0:
+    # 참가자 존재 확인
+    c.execute("SELECT * FROM practitioners WHERE id = ?", (practitioner_id,))
+    if not c.fetchone():
         conn.close()
-        raise HTTPException(status_code=404, detail="Practitioner not found")
+        raise HTTPException(status_code=404, detail="참가자를 찾을 수 없습니다")
+    
+    # 관련 제출물 삭제
+    c.execute("DELETE FROM submissions WHERE practitioner_id = ?", (practitioner_id,))
+    
+    # 참가자 삭제
+    c.execute("DELETE FROM practitioners WHERE id = ?", (practitioner_id,))
     
     conn.commit()
     conn.close()
-    return {"message": "Practitioner deleted successfully"}
+    
+    return {"message": "참가자가 삭제되었습니다"}
 
 # ============================================================================
-# API: 제출물 관리
+# 제출물(Submission) API
 # ============================================================================
 
 @app.get("/submissions")
-async def get_submissions(task_id: Optional[int] = None, practitioner_id: Optional[int] = None):
-    """모든 제출물 조회 (필터 옵션)"""
+async def get_submissions(task_id: Optional[int] = None):
+    """제출물 목록 조회"""
     conn = get_db()
     c = conn.cursor()
     
-    query = """
-        SELECT s.*, p.name as practitioner_name, t.title as task_title
-        FROM submissions s
-        JOIN practitioners p ON s.practitioner_id = p.id
-        JOIN tasks t ON s.task_id = t.id
-        WHERE 1=1
-    """
-    params = []
-    
     if task_id:
-        query += " AND s.task_id = ?"
-        params.append(task_id)
-    if practitioner_id:
-        query += " AND s.practitioner_id = ?"
-        params.append(practitioner_id)
+        c.execute("""
+            SELECT s.*, p.name as practitioner_name, t.title as task_title
+            FROM submissions s
+            JOIN practitioners p ON s.practitioner_id = p.id
+            JOIN tasks t ON s.task_id = t.id
+            WHERE s.task_id = ?
+            ORDER BY s.submission_date DESC
+        """, (task_id,))
+    else:
+        c.execute("""
+            SELECT s.*, p.name as practitioner_name, t.title as task_title
+            FROM submissions s
+            JOIN practitioners p ON s.practitioner_id = p.id
+            JOIN tasks t ON s.task_id = t.id
+            ORDER BY s.submission_date DESC
+        """)
     
-    query += " ORDER BY s.created_at DESC"
-    
-    c.execute(query, params)
     submissions = [dict(row) for row in c.fetchall()]
     conn.close()
-    
-    # grading_result JSON 파싱
-    for sub in submissions:
-        if sub['grading_result']:
-            try:
-                sub['grading_result'] = json.loads(sub['grading_result'])
-            except:
-                pass
-    
     return submissions
 
 @app.get("/submissions/{submission_id}")
 async def get_submission(submission_id: int):
-    """특정 제출물 상세 조회"""
+    """제출물 상세 조회"""
     conn = get_db()
     c = conn.cursor()
-    
     c.execute("""
-        SELECT s.*, p.name as practitioner_name,
-               t.title as task_title, t.input_data, t.golden_output, t.evaluation_notes
+        SELECT s.*, p.name as practitioner_name, t.title as task_title,
+               t.input_data, t.golden_output, t.evaluation_notes
         FROM submissions s
         JOIN practitioners p ON s.practitioner_id = p.id
         JOIN tasks t ON s.task_id = t.id
@@ -402,12 +510,12 @@ async def get_submission(submission_id: int):
     conn.close()
     
     if not submission:
-        raise HTTPException(status_code=404, detail="Submission not found")
+        raise HTTPException(status_code=404, detail="제출물을 찾을 수 없습니다")
     
     result = dict(submission)
     
     # grading_result JSON 파싱
-    if result['grading_result']:
+    if result.get('grading_result'):
         try:
             result['grading_result'] = json.loads(result['grading_result'])
         except:
@@ -421,47 +529,52 @@ async def create_submission(submission: SubmissionCreate):
     conn = get_db()
     c = conn.cursor()
     
-    # task와 practitioner 존재 확인
-    c.execute("SELECT id FROM tasks WHERE id = ?", (submission.task_id,))
+    # 과제 확인
+    c.execute("SELECT * FROM tasks WHERE id = ?", (submission.task_id,))
     if not c.fetchone():
         conn.close()
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise HTTPException(status_code=404, detail="과제를 찾을 수 없습니다")
     
-    c.execute("SELECT id FROM practitioners WHERE id = ?", (submission.practitioner_id,))
+    # 참가자 확인
+    c.execute("SELECT * FROM practitioners WHERE id = ?", (submission.practitioner_id,))
     if not c.fetchone():
         conn.close()
-        raise HTTPException(status_code=404, detail="Practitioner not found")
+        raise HTTPException(status_code=404, detail="참가자를 찾을 수 없습니다")
     
+    # 제출물 생성
     c.execute("""
-        INSERT INTO submissions (task_id, practitioner_id, prompt_text, status)
-        VALUES (?, ?, ?, 'submitted')
-    """, (submission.task_id, submission.practitioner_id, submission.prompt_text))
+        INSERT INTO submissions (practitioner_id, task_id, prompt_text, submission_date)
+        VALUES (?, ?, ?, ?)
+    """, (submission.practitioner_id, submission.task_id, submission.prompt_text, 
+          datetime.now().isoformat()))
     
     submission_id = c.lastrowid
     conn.commit()
     conn.close()
     
-    return {"id": submission_id, "message": "Submission created successfully"}
+    return {"id": submission_id, "message": "제출물이 생성되었습니다"}
 
 @app.put("/submissions/{submission_id}")
 async def update_submission(submission_id: int, submission: SubmissionUpdate):
-    """제출물 수정 (프롬프트만)"""
+    """제출물 수정"""
     conn = get_db()
     c = conn.cursor()
     
-    # 존재 확인
-    c.execute("SELECT id FROM submissions WHERE id = ?", (submission_id,))
+    # 제출물 존재 확인
+    c.execute("SELECT * FROM submissions WHERE id = ?", (submission_id,))
     if not c.fetchone():
         conn.close()
-        raise HTTPException(status_code=404, detail="Submission not found")
+        raise HTTPException(status_code=404, detail="제출물을 찾을 수 없습니다")
     
+    # 수정
     if submission.prompt_text is not None:
-        c.execute("UPDATE submissions SET prompt_text = ?, status = 'submitted' WHERE id = ?", 
-                  (submission.prompt_text, submission_id))
-        conn.commit()
+        c.execute("UPDATE submissions SET prompt_text = ? WHERE id = ?",
+                 (submission.prompt_text, submission_id))
     
+    conn.commit()
     conn.close()
-    return {"message": "Submission updated successfully"}
+    
+    return {"message": "제출물이 수정되었습니다"}
 
 @app.delete("/submissions/{submission_id}")
 async def delete_submission(submission_id: int):
@@ -469,356 +582,269 @@ async def delete_submission(submission_id: int):
     conn = get_db()
     c = conn.cursor()
     
-    c.execute("DELETE FROM submissions WHERE id = ?", (submission_id,))
-    
-    if c.rowcount == 0:
+    # 제출물 존재 확인
+    c.execute("SELECT * FROM submissions WHERE id = ?", (submission_id,))
+    if not c.fetchone():
         conn.close()
-        raise HTTPException(status_code=404, detail="Submission not found")
+        raise HTTPException(status_code=404, detail="제출물을 찾을 수 없습니다")
+    
+    # 제출물 삭제
+    c.execute("DELETE FROM submissions WHERE id = ?", (submission_id,))
     
     conn.commit()
     conn.close()
-    return {"message": "Submission deleted successfully"}
+    
+    return {"message": "제출물이 삭제되었습니다"}
 
 # ============================================================================
-# API: 채점 실행
+# 채점 API
 # ============================================================================
 
-async def grade_submission_background(submission_id: int):
-    """백그라운드에서 제출물 채점"""
-    if not OPENAI_API_KEY:
-        print(f"⚠️  OPENAI_API_KEY not set, skipping grading for submission {submission_id}")
-        return
-    
-    # 진행 상황 초기화
-    grading_progress[submission_id] = {"status": "starting", "current_step": "준비 중", "progress": 0, "details": "채점 시작...", "execution_count": 0, "started_at": time.time(), "updated_at": time.time()}
-    
-    conn = get_db()
-    c = conn.cursor()
-    
-    try:
-        # 제출물 정보 가져오기
-        c.execute("""
-            SELECT s.*, t.golden_output, t.input_data
-            FROM submissions s
-            JOIN tasks t ON s.task_id = t.id
-            WHERE s.id = ?
-        """, (submission_id,))
-        
-        submission = c.fetchone()
-        if not submission:
-            return
-        
-        submission = dict(submission)
-        
-        # 상태 업데이트: 채점 중
-        c.execute("UPDATE submissions SET status = 'grading' WHERE id = ?", (submission_id,))
-        conn.commit()
-        
-        # 채점 엔진 초기화
-        grading_progress[submission_id].update({"status": "step1", "current_step": "1단계: 프롬프트 3회 실행", "progress": 30, "details": "GPT API 호출 중...", "updated_at": time.time()})
-        engine = GradingEngine(api_key=OPENAI_API_KEY)
-        
-        # 1단계: 프롬프트 3회 실행
-        success, outputs, error_msg = engine.execute_prompt_3_times(
-            submission['prompt_text'],
-            submission['input_data']
-        )
-        
-        if not success:
-            c.execute("""
-                UPDATE submissions 
-                SET status = 'failed', grading_result = ? 
-                WHERE id = ?
-            """, (json.dumps({"error": error_msg}), submission_id))
-            conn.commit()
-            return
-        
-        # 실행 결과 저장
-        c.execute("""
-            UPDATE submissions 
-            SET execution_output_1 = ?, execution_output_2 = ?, execution_output_3 = ?
-            WHERE id = ?
-        """, (outputs[0], outputs[1], outputs[2], submission_id))
-        conn.commit()
-        
-        # 2단계: 마스터 평가
-        grading_progress[submission_id].update({"status": "step2", "current_step": "2단계: 평가", "progress": 70, "details": "마스터 평가 중...", "execution_count": 3, "updated_at": time.time()})
-        success, grading_result, error_msg = engine.evaluate_outputs(
-            submission['prompt_text'],
-            outputs,
-            submission['golden_output']
-        )
-        
-        if not success:
-            c.execute("""
-                UPDATE submissions 
-                SET status = 'failed', grading_result = ? 
-                WHERE id = ?
-            """, (json.dumps({"error": error_msg}), submission_id))
-            conn.commit()
-            return
-        
-        # 채점 결과 저장
-        c.execute("""
-            UPDATE submissions 
-            SET status = 'completed', 
-                grading_result = ?,
-                graded_at = ?
-            WHERE id = ?
-        """, (json.dumps(grading_result), datetime.now().isoformat(), submission_id))
-        conn.commit()
-        
-        grading_progress[submission_id].update({"status": "completed", "current_step": "완료", "progress": 100, "details": "채점 완료", "updated_at": time.time()})
-        print(f"✅ Grading completed for submission {submission_id}")
-        
-    except Exception as e:
-        print(f"❌ Grading failed for submission {submission_id}: {e}")
-        c.execute("""
-            UPDATE submissions 
-            SET status = 'failed', grading_result = ? 
-            WHERE id = ?
-        """, (json.dumps({"error": str(e)}), submission_id))
-        conn.commit()
-    finally:
-        conn.close()
-
-@app.post("/submissions/{submission_id}/grade")
+@app.post("/grade/{submission_id}")
 async def grade_submission(submission_id: int, background_tasks: BackgroundTasks):
-    """제출물 채점 시작"""
+    """제출물 채점 시작 (백그라운드)"""
+    
+    # 제출물 조회
     conn = get_db()
     c = conn.cursor()
+    c.execute("""
+        SELECT s.*, t.input_data, t.golden_output, t.evaluation_notes
+        FROM submissions s
+        JOIN tasks t ON s.task_id = t.id
+        WHERE s.id = ?
+    """, (submission_id,))
     
-    # 존재 확인
-    c.execute("SELECT id, status FROM submissions WHERE id = ?", (submission_id,))
     submission = c.fetchone()
     conn.close()
     
     if not submission:
-        raise HTTPException(status_code=404, detail="Submission not found")
+        raise HTTPException(status_code=404, detail="제출물을 찾을 수 없습니다")
     
-    if submission['status'] == 'grading':
-        raise HTTPException(status_code=400, detail="Already grading")
+    # 이미 채점 중인지 확인
+    if submission_id in grading_progress:
+        status = grading_progress[submission_id].get('status')
+        if status in ['starting', 'step1', 'step2']:
+            raise HTTPException(status_code=400, detail="이미 채점 중입니다")
     
-    # 백그라운드 작업 추가
-    background_tasks.add_task(grade_submission_background, submission_id)
-    
-    return {"message": "Grading started", "submission_id": submission_id}
-
-@app.post("/tasks/{task_id}/grade_all")
-async def grade_all_submissions(task_id: int, background_tasks: BackgroundTasks):
-    """특정 과제의 모든 제출물 채점"""
-    conn = get_db()
-    c = conn.cursor()
-    
-    # task 존재 확인
-    c.execute("SELECT id FROM tasks WHERE id = ?", (task_id,))
-    if not c.fetchone():
-        conn.close()
-        raise HTTPException(status_code=404, detail="Task not found")
-    
-    # 제출물 목록
-    c.execute("SELECT id FROM submissions WHERE task_id = ? AND status IN ('submitted', 'failed')", (task_id,))
-    submission_ids = [row['id'] for row in c.fetchall()]
-    conn.close()
-    
-    if not submission_ids:
-        return {"message": "No submissions to grade", "count": 0}
-    
-    # 백그라운드 작업 추가
-    for sub_id in submission_ids:
-        background_tasks.add_task(grade_submission_background, sub_id)
-    
-    return {"message": f"Grading started for {len(submission_ids)} submissions", 
-            "submission_ids": submission_ids}
-
-# ============================================================================
-# API: 채점 현황 대시보드
-# ============================================================================
-
-@app.get("/tasks/{task_id}/dashboard")
-async def get_task_dashboard(task_id: int):
-    """과제별 채점 현황 대시보드"""
-    conn = get_db()
-    c = conn.cursor()
-    
-    # Task 정보
-    c.execute("SELECT * FROM tasks WHERE id = ?", (task_id,))
-    task = c.fetchone()
-    if not task:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Task not found")
-    
-    task = dict(task)
-    
-    # 제출물 통계
-    c.execute("""
-        SELECT 
-            COUNT(*) as total,
-            SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
-            SUM(CASE WHEN status = 'grading' THEN 1 ELSE 0 END) as grading,
-            SUM(CASE WHEN status = 'submitted' THEN 1 ELSE 0 END) as pending,
-            SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
-        FROM submissions
-        WHERE task_id = ?
-    """, (task_id,))
-    
-    stats = dict(c.fetchone())
-    
-    # 제출물 상세 (채점 결과 포함)
-    c.execute("""
-        SELECT s.id, s.status, s.created_at, s.graded_at,
-               s.grading_result, s.execution_output_1, s.execution_output_2, s.execution_output_3,
-               p.name as practitioner_name
-        FROM submissions s
-        JOIN practitioners p ON s.practitioner_id = p.id
-        WHERE s.task_id = ?
-        ORDER BY s.created_at DESC
-    """, (task_id,))
-    
-    submissions = []
-    for row in c.fetchall():
-        sub = dict(row)
-        if sub['grading_result']:
-            try:
-                sub['grading_result'] = json.loads(sub['grading_result'])
-            except:
-                pass
-        submissions.append(sub)
-    
-    conn.close()
-    
-    # 리더보드 (점수 순)
-    leaderboard = []
-    for sub in submissions:
-        if sub['status'] == 'completed' and sub['grading_result']:
-            # detailed_criteria에서 점수 추출 (동적으로)
-            criteria = sub['grading_result'].get('detailed_criteria', [])
-            criteria_dict = {}
-            for c in criteria:
-                criteria_dict[c['criterion']] = c['score']
-            
-            leaderboard.append({
-                "submission_id": sub['id'],
-                "practitioner_name": sub['practitioner_name'],
-                "total_score": sub['grading_result'].get('overall_score', 0),
-                "criteria": criteria_dict,  # 모든 평가 기준을 전달
-                "graded_at": sub['graded_at']
-            })
-    
-    # 총점 기준으로 정렬
-    leaderboard.sort(key=lambda x: x['total_score'], reverse=True)
-    
-    return {
-        "task": task,
-        "statistics": stats,
-        "submissions": submissions,
-        "leaderboard": leaderboard
+    # 진행 상황 초기화
+    grading_progress[submission_id] = {
+        'status': 'starting',
+        'current_step': '채점 준비 중...',
+        'progress': 0,
+        'details': None,
+        'execution_count': 0
     }
+    
+    # 백그라운드 채점 시작
+    background_tasks.add_task(
+        grade_submission_task,
+        submission_id,
+        dict(submission)
+    )
+    
+    return {"message": "채점이 시작되었습니다", "submission_id": submission_id}
 
-# ============================================================================
-# API: 채점 진행 상황 조회
-# ============================================================================
-
-@app.get("/grading/progress/{submission_id}")
-async def get_grading_progress(submission_id: int):
-    """특정 제출물의 채점 진행 상황 조회"""
-    if submission_id not in grading_progress:
+async def grade_submission_task(submission_id: int, submission: dict):
+    """백그라운드 채점 작업"""
+    
+    try:
+        # 1단계: 프롬프트 실행 (3회)
+        grading_progress[submission_id].update({
+            'status': 'step1',
+            'current_step': '프롬프트 실행 중 (1/3)...',
+            'progress': 10
+        })
+        
+        engine = GradingEngine(api_key=OPENAI_API_KEY)
+        
+        execution_results = []
+        for i in range(3):
+            grading_progress[submission_id].update({
+                'current_step': f'프롬프트 실행 중 ({i+1}/3)...',
+                'progress': 10 + (i * 20),
+                'execution_count': i + 1
+            })
+            
+            success, result, error = engine.execute_prompt(
+                submission['prompt_text'],
+                submission['input_data']
+            )
+            
+            execution_results.append({
+                'execution_number': i + 1,
+                'success': success,
+                'output': result if success else None,
+                'error': error
+            })
+        
+        # 2단계: 마스터 평가 프롬프트
+        grading_progress[submission_id].update({
+            'status': 'step2',
+            'current_step': '종합 평가 중...',
+            'progress': 70
+        })
+        
+        success, result, error = engine.evaluate_outputs(
+            submission['prompt_text'],
+            submission['input_data'],
+            submission['golden_output'],
+            execution_results,
+            submission.get('evaluation_notes')
+        )
+        
+        if not success:
+            raise Exception(f"평가 실패: {error}")
+        
+        # 채점 결과 저장
+        grading_result = {
+            'execution_results': execution_results,
+            **result
+        }
+        
         conn = get_db()
         c = conn.cursor()
-        c.execute("SELECT status FROM submissions WHERE id = ?", (submission_id,))
-        row = c.fetchone()
+        c.execute("""
+            UPDATE submissions 
+            SET score = ?, grading_result = ?, graded_at = ?
+            WHERE id = ?
+        """, (
+            result.get('overall_score', 0),
+            json.dumps(grading_result, ensure_ascii=False),
+            datetime.now().isoformat(),
+            submission_id
+        ))
+        conn.commit()
         conn.close()
         
-        if not row:
-            raise HTTPException(status_code=404, detail="Submission not found")
+        # 완료 상태
+        grading_progress[submission_id].update({
+            'status': 'completed',
+            'current_step': '채점 완료!',
+            'progress': 100,
+            'details': result
+        })
         
-        status = row[0]
-        if status == "completed":
-            return {"status": "completed", "current_step": "채점 완료", "progress": 100, 
-                    "details": "채점이 종료되었습니다.", "execution_count": 3}
-        elif status == "failed":
-            return {"status": "failed", "current_step": "채점 실패", "progress": 0, 
-                    "details": "채점에 실패했습니다.", "execution_count": 0}
-        else:
-            return {"status": "not_started", "current_step": "대기 중", "progress": 0, 
-                    "details": "채점이 시작되지 않았습니다.", "execution_count": 0}
-    
-    return grading_progress[submission_id]
+    except Exception as e:
+        # 오류 상태
+        grading_progress[submission_id].update({
+            'status': 'error',
+            'current_step': f'채점 오류: {str(e)}',
+            'progress': 0,
+            'error': str(e)
+        })
 
 @app.get("/grading/progress")
 async def get_all_grading_progress():
-    """현재 진행 중인 모든 채점의 진행 상황 조회"""
-    return {"active_gradings": len(grading_progress), "details": grading_progress}
+    """모든 채점 진행 상황 조회"""
+    return grading_progress
 
-# ============================================================================
-# API: 파일 업로드
-# ============================================================================
-
-@app.post("/upload/parse")
-async def upload_and_parse_file(file: UploadFile = File(...)):
-    """
-    파일 업로드 및 파싱
-    PDF, TXT, Excel 파일 지원
-    """
-    try:
-        # 파일 확장자 확인
-        filename = file.filename or ""
-        if not filename:
-            raise HTTPException(status_code=400, detail="No filename provided")
-        
-        # 지원하는 파일 형식 확인
-        supported_extensions = ('.txt', '.pdf', '.xlsx', '.xls', '.csv')
-        if not filename.lower().endswith(supported_extensions):
-            raise HTTPException(
-                status_code=400, 
-                detail=f"Unsupported file type. Supported: {', '.join(supported_extensions)}"
-            )
-        
-        # 파일 읽기
-        content = await file.read()
-        
-        # 파일 타입 감지
-        file_type = FileParser.detect_file_type(filename)
-        if not file_type:
-            raise HTTPException(status_code=400, detail="Unsupported file type")
-        
-        # 파일 파싱
-        success, parsed_text = FileParser.parse_file(content, file_type)
-        
-        if not success:
-            raise HTTPException(status_code=500, detail=f"File parsing failed: {parsed_text}")
-        
-        return {
-            "filename": filename,
-            "size": len(content),
-            "text": parsed_text,  # 프론트엔드에서 'text' 필드 사용
-            "content": parsed_text,  # 호환성
-            "preview": parsed_text[:500] + ("..." if len(parsed_text) > 500 else "")
-        }
+@app.get("/grading/progress/{submission_id}")
+async def get_grading_progress(submission_id: int):
+    """특정 제출물 채점 진행 상황 조회"""
+    if submission_id not in grading_progress:
+        return {"status": "not_started", "message": "채점이 시작되지 않았습니다"}
     
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"File parsing failed: {str(e)}")
+    return grading_progress[submission_id]
 
 # ============================================================================
-# 정적 파일 서빙
+# 대시보드 및 통계 API
 # ============================================================================
 
-os.makedirs("static", exist_ok=True)
-app.mount("/static", StaticFiles(directory="static"), name="static")
+@app.get("/dashboard/stats")
+async def get_dashboard_stats():
+    """대시보드 통계"""
+    conn = get_db()
+    c = conn.cursor()
+    
+    # 전체 통계
+    c.execute("SELECT COUNT(*) as count FROM practitioners")
+    total_practitioners = c.fetchone()['count']
+    
+    c.execute("SELECT COUNT(*) as count FROM tasks")
+    total_tasks = c.fetchone()['count']
+    
+    c.execute("SELECT COUNT(*) as count FROM submissions")
+    total_submissions = c.fetchone()['count']
+    
+    c.execute("SELECT COUNT(*) as count FROM submissions WHERE grading_result IS NOT NULL")
+    graded_count = c.fetchone()['count']
+    
+    c.execute("SELECT AVG(score) as avg_score FROM submissions WHERE score IS NOT NULL")
+    avg_score = c.fetchone()['avg_score'] or 0
+    
+    # 과제별 통계
+    c.execute("""
+        SELECT 
+            t.id,
+            t.title,
+            COUNT(s.id) as submission_count,
+            COUNT(CASE WHEN s.grading_result IS NOT NULL THEN 1 END) as graded_count,
+            AVG(s.score) as avg_score
+        FROM tasks t
+        LEFT JOIN submissions s ON t.id = s.task_id
+        GROUP BY t.id
+    """)
+    
+    task_stats = [dict(row) for row in c.fetchall()]
+    
+    conn.close()
+    
+    return {
+        'total_practitioners': total_practitioners,
+        'total_tasks': total_tasks,
+        'total_submissions': total_submissions,
+        'graded_count': graded_count,
+        'avg_score': round(avg_score, 2),
+        'task_stats': task_stats
+    }
 
-@app.get("/app")
-async def serve_frontend():
-    """프론트엔드 서빙"""
-    static_index = os.path.join("static", "index.html")
-    if os.path.exists(static_index):
-        return FileResponse(static_index)
+@app.get("/leaderboard")
+async def get_leaderboard(task_id: Optional[int] = None):
+    """리더보드"""
+    conn = get_db()
+    c = conn.cursor()
+    
+    if task_id:
+        c.execute("""
+            SELECT 
+                p.name as practitioner_name,
+                t.title as task_title,
+                s.score,
+                s.graded_at,
+                s.id as submission_id
+            FROM submissions s
+            JOIN practitioners p ON s.practitioner_id = p.id
+            JOIN tasks t ON s.task_id = t.id
+            WHERE s.score IS NOT NULL AND s.task_id = ?
+            ORDER BY s.score DESC, s.graded_at ASC
+        """, (task_id,))
     else:
-        return {"message": "Frontend not available yet"}
+        c.execute("""
+            SELECT 
+                p.name as practitioner_name,
+                t.title as task_title,
+                s.score,
+                s.graded_at,
+                s.id as submission_id
+            FROM submissions s
+            JOIN practitioners p ON s.practitioner_id = p.id
+            JOIN tasks t ON s.task_id = t.id
+            WHERE s.score IS NOT NULL
+            ORDER BY s.score DESC, s.graded_at ASC
+        """)
+    
+    leaderboard = [dict(row) for row in c.fetchall()]
+    conn.close()
+    
+    return leaderboard
 
 # ============================================================================
-# 서버 실행
+# Static 파일 서빙
 # ============================================================================
+
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
