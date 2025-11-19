@@ -15,6 +15,12 @@ class GradingEngine:
     """PRD 준수 자동 채점 엔진"""
     
     def __init__(self, api_key: str, model: str = "gpt-4o-mini"):
+        # Railway 환경의 프록시 설정 문제 해결: 환경변수 제거
+        os.environ.pop('HTTP_PROXY', None)
+        os.environ.pop('HTTPS_PROXY', None)
+        os.environ.pop('http_proxy', None)
+        os.environ.pop('https_proxy', None)
+        
         # OpenAI 클라이언트 초기화
         self.client = OpenAI(api_key=api_key)
         self.model = model
@@ -226,7 +232,7 @@ class GradingEngine:
 ### 1. 정확성 (Prompt Accuracy) - 50점
 - 50점: 프롬프트 실행 결과가 목표 산출물과 내용/형식 모두 일치
 - 30점: 핵심 내용은 일치하나, 일부 누락 요소가 있거나 형식이 불일치
-- 20점 이하: 주요 내용이 누락되거나 구조 자체가 다름
+- 20점 이하: 주요 내용이 누락���거나 구조 자체가 다름
 
 ### 2. 명확성 (Prompt Clarity) - 30점
 - 30점: 명확한 역할 지시(예: '너는 데이터 분석가') + 단계별 수행 지침 + 논리적이고 직관적
