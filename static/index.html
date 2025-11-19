@@ -758,18 +758,8 @@ function displayGradingProgress(data) {
     container.innerHTML = html;
 }
 
-// 채점 시작 시 모니터링 자동 시작
-const originalGradeOneSubmission = gradeOneSubmission;
-gradeOneSubmission = async function(submissionId) {
-    await originalGradeOneSubmission(submissionId);
-    startProgressMonitoring();
-};
+// 채점 함수는 아래에 정의됨
 
-const originalGradeAllSubmissions = gradeAllSubmissions;
-gradeAllSubmissions = async function() {
-    await originalGradeAllSubmissions();
-    startProgressMonitoring();
-};
 
 // 탭 전환 시 폴링 제어
 window.addEventListener('hashchange', function() {
@@ -1851,10 +1841,12 @@ async function bulkUploadSubmissions() {
         `;
         
         // 버튼 비활성화
-        const btn = event.target;
-        btn.disabled = true;
-        btn.style.opacity = '0.5';
-        btn.textContent = '업로드 중...';
+        const btn = document.querySelector('button[onclick="bulkUploadSubmissions()"]');
+        if (btn) {
+            btn.disabled = true;
+            btn.style.opacity = '0.5';
+            btn.textContent = '업로드 중...';
+        }
         
         // API 호출
         const response = await fetch('/bulk-upload', {
@@ -1923,10 +1915,12 @@ async function bulkUploadSubmissions() {
         `;
     } finally {
         // 버튼 활성화
-        const btn = event.target;
-        btn.disabled = false;
-        btn.style.opacity = '1';
-        btn.textContent = '📤 일괄 업로드 실행';
+        const btn = document.querySelector('button[onclick="bulkUploadSubmissions()"]');
+        if (btn) {
+            btn.disabled = false;
+            btn.style.opacity = '1';
+            btn.textContent = '📤 일괄 업로드 실행';
+        }
     }
 }
 

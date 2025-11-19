@@ -467,30 +467,36 @@ async def delete_practitioner(practitioner_id: int):
 @app.get("/submissions")
 async def get_submissions(task_id: Optional[int] = None):
     """제출물 목록 조회"""
-    conn = get_db()
-    c = conn.cursor()
-    
-    if task_id:
-        c.execute("""
-            SELECT s.*, p.name as practitioner_name, t.title as task_title
-            FROM submissions s
-            JOIN practitioners p ON s.practitioner_id = p.id
-            JOIN tasks t ON s.task_id = t.id
-            WHERE s.task_id = ?
-            ORDER BY s.submission_date DESC
-        """, (task_id,))
-    else:
-        c.execute("""
-            SELECT s.*, p.name as practitioner_name, t.title as task_title
-            FROM submissions s
-            JOIN practitioners p ON s.practitioner_id = p.id
-            JOIN tasks t ON s.task_id = t.id
-            ORDER BY s.submission_date DESC
-        """)
-    
-    submissions = [dict(row) for row in c.fetchall()]
-    conn.close()
-    return submissions
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        
+        if task_id:
+            c.execute("""
+                SELECT s.*, p.name as practitioner_name, t.title as task_title
+                FROM submissions s
+                JOIN practitioners p ON s.practitioner_id = p.id
+                JOIN tasks t ON s.task_id = t.id
+                WHERE s.task_id = ?
+                ORDER BY s.submission_date DESC
+            """, (task_id,))
+        else:
+            c.execute("""
+                SELECT s.*, p.name as practitioner_name, t.title as task_title
+                FROM submissions s
+                JOIN practitioners p ON s.practitioner_id = p.id
+                JOIN tasks t ON s.task_id = t.id
+                ORDER BY s.submission_date DESC
+            """)
+        
+        submissions = [dict(row) for row in c.fetchall()]
+        conn.close()
+        return submissions
+    except Exception as e:
+        import traceback
+        print(f"❌ submissions API 오류: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/submissions/{submission_id}")
 async def get_submission(submission_id: int):
