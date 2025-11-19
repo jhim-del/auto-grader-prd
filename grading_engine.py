@@ -15,7 +15,12 @@ class GradingEngine:
     """PRD 준수 자동 채점 엔진"""
     
     def __init__(self, api_key: str, model: str = "gpt-4o-mini"):
-        self.client = OpenAI(api_key=api_key)
+        # OpenAI 클라이언트 초기화 (최신 버전 호환성)
+        self.client = OpenAI(
+            api_key=api_key,
+            max_retries=3,
+            timeout=60.0
+        )
         self.model = model
         
         # PRD NFR2: 평가 시 temperature=0
@@ -222,20 +227,20 @@ class GradingEngine:
         prompt += """
 ## Evaluation Criteria:
 
-### 1. Accuracy (50 points)
-- 50 points: Perfect match with golden output OR fully meets conceptual requirements
-- 30 points: Core content correct but minor differences in expression/structure
-- 20 points or less: Missing key information or contains errors
+### 1. 정확성 (Prompt Accuracy) - 50점
+- 50점: 프롬프트 실행 결과가 목표 산출물과 내용/형식 모두 일치
+- 30점: 핵심 내용은 일치하나, 일부 누락 요소가 있거나 형식이 불일치
+- 20점 이하: 주요 내용이 누락되거나 구조 자체가 다름
 
-### 2. Clarity (30 points)
-- 30 points: Clear persona, context, step-by-step instructions
-- 20 points: Some ambiguity that may cause output variability
-- 10 points or less: Unclear structure, AI must interpret intent arbitrarily
+### 2. 명확성 (Prompt Clarity) - 30점
+- 30점: 명확한 역할 지시(예: '너는 데이터 분석가') + 단계별 수행 지침 + 논리적이고 직관적
+- 20점: 이해 가능하지만 일부 모호한 표현이 포함됨
+- 10점 이하: 구조나 지시문이 애매하거나 모순적
 
-### 3. Consistency (20 points)
-- 20 points: All 3 outputs identical (100% match) AND prompt includes validation mechanisms
-- 15 points: 2 out of 3 outputs match (partial consistency)
-- 10 points: All outputs different or only 1 match (consistency failed)
+### 3. 구성 및 검증 (Prompt Validation & Consistency) - 20점
+- 20점: 재실행 시 동일한 결과가 나오며 편차가 없음
+- 10점: 경미한 편차가 있으나 핵심 내용은 유지됨
+- 10점 이하: 매 실행마다 크게 다른 결과가 나옴
 
 ## Output Format (JSON):
 {
