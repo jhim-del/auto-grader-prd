@@ -606,6 +606,7 @@ async def delete_submission(submission_id: int):
 # ============================================================================
 
 @app.post("/grade/{submission_id}")
+@app.post("/submissions/{submission_id}/grade")
 async def grade_submission(submission_id: int, background_tasks: BackgroundTasks):
     """제출물 채점 시작 (백그라운드)"""
     
