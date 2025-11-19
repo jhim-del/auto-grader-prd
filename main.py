@@ -634,6 +634,35 @@ async def get_submission_detail(submission_id: int):
     return detail
 
 
+@app.post("/create_demo_data")
+async def create_demo_data_endpoint():
+    """실제 과제 데이터 생성 엔드포인트"""
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["python3", "create_demo_data.py"],
+            cwd=os.path.dirname(__file__) or ".",
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+        
+        if result.returncode == 0:
+            return {
+                "status": "success",
+                "message": "Demo data created successfully",
+                "output": result.stdout
+            }
+        else:
+            return {
+                "status": "error",
+                "message": "Failed to create demo data",
+                "error": result.stderr
+            }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ----- 정적 파일 서빙 -----
 
 os.makedirs("static", exist_ok=True)
