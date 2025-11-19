@@ -7,6 +7,7 @@ import os
 import json
 import sqlite3
 import asyncio
+import time
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 from fastapi import FastAPI, HTTPException, BackgroundTasks, File, UploadFile, Form
@@ -22,6 +23,10 @@ from file_parser import FileParser
 DATA_DIR = os.environ.get("DATA_DIR", ".")
 DB_PATH = os.path.join(DATA_DIR, "competition_prd.db")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+
+# 채점 진행 상황 추적 (메모리에 저장)
+grading_progress = {}
+# 구조: {submission_id: {status, current_step, progress, details, execution_count, ...}}
 
 app = FastAPI(title="Auto-Grader v3.0 - 완전한 관리 시스템")
 
@@ -469,6 +474,9 @@ async def grade_submission_background(submission_id: int):
         print(f"⚠️  OPENAI_API_KEY not set, skipping grading for submission {submission_id}")
         return
     
+    # 진행 상황 초기화
+    grading_progress[submission_id] = {"status": "starting", "current_step": "준비 중", "progress": 0, "details": "채점 시작...", "execution_count": 0, "started_at": time.time(), "updated_at": time.time()}
+    
     conn = get_db()
     c = conn.cursor()
     
@@ -492,6 +500,7 @@ async def grade_submission_background(submission_id: int):
         conn.commit()
         
         # 채점 엔진 초기화
+        grading_progress[submission_id].update({"status": "step1", "current_step": "1단계: 프롬프트 3회 실행", "progress": 30, "details": "GPT API 호출 중...", "updated_at": time.time()})
         engine = GradingEngine(api_key=OPENAI_API_KEY)
         
         # 1단계: 프롬프트 3회 실행
@@ -518,6 +527,7 @@ async def grade_submission_background(submission_id: int):
         conn.commit()
         
         # 2단계: 마스터 평가
+        grading_progress[submission_id].update({"status": "step2", "current_step": "2단계: 평가", "progress": 70, "details": "마스터 평가 중...", "execution_count": 3, "updated_at": time.time()})
         grading_result = engine.grade_with_master_prompt(
             submission['prompt_text'],
             outputs,
@@ -534,6 +544,7 @@ async def grade_submission_background(submission_id: int):
         """, (json.dumps(grading_result), datetime.now().isoformat(), submission_id))
         conn.commit()
         
+        grading_progress[submission_id].update({"status": "completed", "current_step": "완료", "progress": 100, "details": "채점 완료", "updated_at": time.time()})
         print(f"✅ Grading completed for submission {submission_id}")
         
     except Exception as e:
@@ -679,6 +690,41 @@ async def get_task_dashboard(task_id: int):
         "submissions": submissions,
         "leaderboard": leaderboard
     }
+
+# ============================================================================
+# API: 채점 진행 상황 조회
+# ============================================================================
+
+@app.get("/grading/progress/{submission_id}")
+async def get_grading_progress(submission_id: int):
+    """특정 제출물의 채점 진행 상황 조회"""
+    if submission_id not in grading_progress:
+        conn = get_db()
+        c = conn.cursor()
+        c.execute("SELECT status FROM submissions WHERE id = ?", (submission_id,))
+        row = c.fetchone()
+        conn.close()
+        
+        if not row:
+            raise HTTPException(status_code=404, detail="Submission not found")
+        
+        status = row[0]
+        if status == "completed":
+            return {"status": "completed", "current_step": "채점 완료", "progress": 100, 
+                    "details": "채점이 종료되었습니다.", "execution_count": 3}
+        elif status == "failed":
+            return {"status": "failed", "current_step": "채점 실패", "progress": 0, 
+                    "details": "채점에 실패했습니다.", "execution_count": 0}
+        else:
+            return {"status": "not_started", "current_step": "대기 중", "progress": 0, 
+                    "details": "채점이 시작되지 않았습니다.", "execution_count": 0}
+    
+    return grading_progress[submission_id]
+
+@app.get("/grading/progress")
+async def get_all_grading_progress():
+    """현재 진행 중인 모든 채점의 진행 상황 조회"""
+    return {"active_gradings": len(grading_progress), "details": grading_progress}
 
 # ============================================================================
 # API: 파일 업로드
