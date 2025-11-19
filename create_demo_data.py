@@ -16,41 +16,11 @@ DB_PATH = os.path.join(DATA_DIR, "competition_prd.db")
 # 실무자 데이터 (5명)
 # ============================================================================
 PRACTITIONERS = [
-    {
-        "name": "김도현",
-        "email": "dohyun.kim@dbinc.com",
-        "department": "데이터분석팀",
-        "position": "선임연구원",
-        "years_of_experience": 5
-    },
-    {
-        "name": "이서연",
-        "email": "seoyeon.lee@dbinc.com",
-        "department": "전략기획팀",
-        "position": "책임매니저",
-        "years_of_experience": 7
-    },
-    {
-        "name": "박준혁",
-        "email": "junhyuk.park@dbinc.com",
-        "department": "IT보안운영팀",
-        "position": "수석엔지니어",
-        "years_of_experience": 10
-    },
-    {
-        "name": "최은지",
-        "email": "eunji.choi@dbinc.com",
-        "department": "고객성공팀",
-        "position": "주임",
-        "years_of_experience": 3
-    },
-    {
-        "name": "정민수",
-        "email": "minsu.jung@dbinc.com",
-        "department": "데이터분석팀",
-        "position": "연구원",
-        "years_of_experience": 2
-    }
+    {"name": "김도현"},
+    {"name": "이서연"},
+    {"name": "박준혁"},
+    {"name": "최은지"},
+    {"name": "정민수"}
 ]
 
 # ============================================================================
@@ -667,10 +637,6 @@ def init_database():
     CREATE TABLE IF NOT EXISTS practitioners (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
-        email TEXT UNIQUE NOT NULL,
-        department TEXT,
-        position TEXT,
-        years_of_experience INTEGER,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """)
@@ -735,11 +701,11 @@ def create_demo_data():
         practitioners = {}
         for p_data in PRACTITIONERS:
             c.execute("""
-                INSERT INTO practitioners (name, email, department, position, years_of_experience)
-                VALUES (?, ?, ?, ?, ?)
-            """, (p_data["name"], p_data["email"], p_data["department"], p_data["position"], p_data["years_of_experience"]))
+                INSERT INTO practitioners (name)
+                VALUES (?)
+            """, (p_data["name"],))
             practitioners[p_data["name"]] = c.lastrowid
-            print(f"  ✓ {p_data['name']} ({p_data['department']}/{p_data['position']})")
+            print(f"  ✓ {p_data['name']}")
         conn.commit()
         print(f"✓ 총 {len(practitioners)}명 실무자 생성 완료")
         
@@ -791,8 +757,7 @@ def create_demo_data():
         print(f"✓ 제출물: {submission_count}개")
         print("\n실무자 목록:")
         for name in practitioners.keys():
-            p_data = next(p for p in PRACTITIONERS if p["name"] == name)
-            print(f"  - {name} ({p_data['department']}/{p_data['position']}, {p_data['years_of_experience']}년)")
+            print(f"  - {name}")
         print("\n과제 목록:")
         for task_data in task_data_list:
             print(f"  - {task_data['title']}")

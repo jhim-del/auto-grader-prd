@@ -1,0 +1,140 @@
+[
+  {
+    "test": "API Health Check",
+    "passed": true,
+    "details": "Status: 200",
+    "timestamp": "2025-11-19T07:19:42.822201"
+  },
+  {
+    "test": "과제 생성 (정상)",
+    "passed": true,
+    "details": "Task ID: 7",
+    "timestamp": "2025-11-19T07:19:42.831810"
+  },
+  {
+    "test": "과제 생성 (긴 텍스트)",
+    "passed": true,
+    "details": "4000자",
+    "timestamp": "2025-11-19T07:19:42.840630"
+  },
+  {
+    "test": "과제 생성 (특수문자)",
+    "passed": true,
+    "details": "",
+    "timestamp": "2025-11-19T07:19:42.847297"
+  },
+  {
+    "test": "과제 생성 (필수 필드 누락)",
+    "passed": true,
+    "details": "Status: 422",
+    "timestamp": "2025-11-19T07:19:42.854589"
+  },
+  {
+    "test": "참가자 등록 (정상)",
+    "passed": true,
+    "details": "Practitioner ID: 9",
+    "timestamp": "2025-11-19T07:19:42.874448"
+  },
+  {
+    "test": "참가자 등록 (중복 이메일)",
+    "passed": true,
+    "details": "Status: 400",
+    "timestamp": "2025-11-19T07:19:42.986789"
+  },
+  {
+    "test": "참가자 등록 (잘못된 이메일)",
+    "passed": true,
+    "details": "Status: 422",
+    "timestamp": "2025-11-19T07:19:42.990032"
+  },
+  {
+    "test": "참가자 등록 (최소 필드)",
+    "passed": true,
+    "details": "",
+    "timestamp": "2025-11-19T07:19:42.997110"
+  },
+  {
+    "test": "제출물 등록 (정상)",
+    "passed": true,
+    "details": "Submission ID: 18",
+    "timestamp": "2025-11-19T07:19:43.004627"
+  },
+  {
+    "test": "제출물 등록 (긴 프롬프트)",
+    "passed": true,
+    "details": "1722자",
+    "timestamp": "2025-11-19T07:19:43.013066"
+  },
+  {
+    "test": "제출물 등록 (존재하지 않는 과제)",
+    "passed": true,
+    "details": "Status: 404",
+    "timestamp": "2025-11-19T07:19:43.017212"
+  },
+  {
+    "test": "과제 목록 조회",
+    "passed": true,
+    "details": "8개",
+    "timestamp": "2025-11-19T07:19:43.023073"
+  },
+  {
+    "test": "참가자 목록 조회",
+    "passed": true,
+    "details": "11명",
+    "timestamp": "2025-11-19T07:19:43.027825"
+  },
+  {
+    "test": "제출물 목록 조회",
+    "passed": true,
+    "details": "18개",
+    "timestamp": "2025-11-19T07:19:43.038394"
+  },
+  {
+    "test": "제출물 상세 조회",
+    "passed": true,
+    "details": "ID: 18",
+    "timestamp": "2025-11-19T07:19:43.042815"
+  },
+  {
+    "test": "과제 수정",
+    "passed": true,
+    "details": "Task ID: 7",
+    "timestamp": "2025-11-19T07:19:43.049704"
+  },
+  {
+    "test": "참가자 수정",
+    "passed": true,
+    "details": "Practitioner ID: 9",
+    "timestamp": "2025-11-19T07:19:43.056239"
+  },
+  {
+    "test": "제출물 수정",
+    "passed": true,
+    "details": "Submission ID: 18",
+    "timestamp": "2025-11-19T07:19:43.063524"
+  },
+  {
+    "test": "채점 (API KEY 없음)",
+    "passed": true,
+    "details": "백그라운드 작업 시작",
+    "timestamp": "2025-11-19T07:19:43.067552"
+  },
+  {
+    "test": "대시보드 (채점 전)",
+    "passed": true,
+    "details": "통계: {'total': 1, 'completed': 0, 'grading': 0, 'pending': 1, 'failed': 0}",
+    "timestamp": "2025-11-19T07:19:45.081035"
+  },
+  {
+    "test": "제출물 삭제",
+    "passed": true,
+    "details": "Submission ID: 19",
+    "timestamp": "2025-11-19T07:19:45.105846"
+  },
+  {
+    "test": "과제 삭제 (제출물 포함)",
+    "passed": true,
+    "details": "연결된 제출물도 함께 삭제",
+    "timestamp": "2025-11-19T07:19:45.129148"
+  }
+]

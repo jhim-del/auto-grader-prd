@@ -13,7 +13,7 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks, File, UploadFile, F
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 
 from grading_engine import GradingEngine
 from file_parser import FileParser
@@ -53,18 +53,10 @@ class TaskUpdate(BaseModel):
     evaluation_notes: Optional[str] = None
 
 class PractitionerCreate(BaseModel):
-    name: str
-    email: EmailStr  # 이메일 검증 추가
-    department: Optional[str] = None
-    position: Optional[str] = None
-    years_of_experience: Optional[int] = None
+    name: str  # 이름만 필요
 
 class PractitionerUpdate(BaseModel):
-    name: Optional[str] = None
-    email: Optional[EmailStr] = None  # 이메일 검증 추가
-    department: Optional[str] = None
-    position: Optional[str] = None
-    years_of_experience: Optional[int] = None
+    name: Optional[str] = None  # 이름만 수정 가능
 
 class SubmissionCreate(BaseModel):
     task_id: int
@@ -89,15 +81,11 @@ def init_db():
     conn = get_db()
     c = conn.cursor()
     
-    # practitioners 테이블
+    # practitioners 테이블 (이름만)
     c.execute("""
     CREATE TABLE IF NOT EXISTS practitioners (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
-        email TEXT UNIQUE NOT NULL,
-        department TEXT,
-        position TEXT,
-        years_of_experience INTEGER,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """)
@@ -284,21 +272,16 @@ async def create_practitioner(practitioner: PractitionerCreate):
     conn = get_db()
     c = conn.cursor()
     
-    try:
-        c.execute("""
-            INSERT INTO practitioners (name, email, department, position, years_of_experience)
-            VALUES (?, ?, ?, ?, ?)
-        """, (practitioner.name, practitioner.email, practitioner.department, 
-              practitioner.position, practitioner.years_of_experience))
-        
-        practitioner_id = c.lastrowid
-        conn.commit()
-        conn.close()
-        
-        return {"id": practitioner_id, "message": "Practitioner created successfully"}
-    except sqlite3.IntegrityError:
-        conn.close()
-        raise HTTPException(status_code=400, detail="Email already exists")
+    c.execute("""
+        INSERT INTO practitioners (name)
+        VALUES (?)
+    """, (practitioner.name,))
+    
+    practitioner_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    
+    return {"id": practitioner_id, "message": "Practitioner created successfully"}
 
 @app.put("/practitioners/{practitioner_id}")
 async def update_practitioner(practitioner_id: int, practitioner: PractitionerUpdate):
@@ -312,34 +295,10 @@ async def update_practitioner(practitioner_id: int, practitioner: PractitionerUp
         conn.close()
         raise HTTPException(status_code=404, detail="Practitioner not found")
     
-    # 수정할 필드만 업데이트
-    updates = []
-    values = []
-    
+    # 이름만 업데이트
     if practitioner.name is not None:
-        updates.append("name = ?")
-        values.append(practitioner.name)
-    if practitioner.email is not None:
-        updates.append("email = ?")
-        values.append(practitioner.email)
-    if practitioner.department is not None:
-        updates.append("department = ?")
-        values.append(practitioner.department)
-    if practitioner.position is not None:
-        updates.append("position = ?")
-        values.append(practitioner.position)
-    if practitioner.years_of_experience is not None:
-        updates.append("years_of_experience = ?")
-        values.append(practitioner.years_of_experience)
-    
-    if updates:
-        values.append(practitioner_id)
-        try:
-            c.execute(f"UPDATE practitioners SET {', '.join(updates)} WHERE id = ?", values)
-            conn.commit()
-        except sqlite3.IntegrityError:
-            conn.close()
-            raise HTTPException(status_code=400, detail="Email already exists")
+        c.execute("UPDATE practitioners SET name = ? WHERE id = ?", (practitioner.name, practitioner_id))
+        conn.commit()
     
     conn.close()
     return {"message": "Practitioner updated successfully"}
@@ -411,7 +370,7 @@ async def get_submission(submission_id: int):
     c = conn.cursor()
     
     c.execute("""
-        SELECT s.*, p.name as practitioner_name, p.email, p.department, p.position,
+        SELECT s.*, p.name as practitioner_name,
                t.title as task_title, t.input_data, t.golden_output, t.evaluation_notes
         FROM submissions s
         JOIN practitioners p ON s.practitioner_id = p.id
@@ -674,7 +633,7 @@ async def get_task_dashboard(task_id: int):
     c.execute("""
         SELECT s.id, s.status, s.created_at, s.graded_at,
                s.grading_result, s.execution_output_1, s.execution_output_2, s.execution_output_3,
-               p.name as practitioner_name, p.department, p.position
+               p.name as practitioner_name
         FROM submissions s
         JOIN practitioners p ON s.practitioner_id = p.id
         WHERE s.task_id = ?
@@ -700,8 +659,6 @@ async def get_task_dashboard(task_id: int):
             leaderboard.append({
                 "submission_id": sub['id'],
                 "practitioner_name": sub['practitioner_name'],
-                "department": sub['department'],
-                "position": sub['position'],
                 "total_score": sub['grading_result'].get('total_score', 0),
                 "accuracy_score": sub['grading_result'].get('accuracy_score', 0),
                 "clarity_score": sub['grading_result'].get('clarity_score', 0),

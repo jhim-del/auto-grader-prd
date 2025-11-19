@@ -622,26 +622,6 @@
                     <input type="text" id="practitioner-name" required>
                 </div>
                 
-                <div class="form-group">
-                    <label>이메일 *</label>
-                    <input type="email" id="practitioner-email" required>
-                </div>
-                
-                <div class="form-group">
-                    <label>부서</label>
-                    <input type="text" id="practitioner-department">
-                </div>
-                
-                <div class="form-group">
-                    <label>직급</label>
-                    <input type="text" id="practitioner-position">
-                </div>
-                
-                <div class="form-group">
-                    <label>경력 (년)</label>
-                    <input type="number" id="practitioner-experience" min="0">
-                </div>
-                
                 <div class="form-actions">
                     <button type="submit" class="btn btn-primary">저장</button>
                     <button type="button" class="btn btn-secondary" onclick="closeModal('practitioner-modal')">취소</button>
@@ -932,8 +912,7 @@
                             </div>
                         </div>
                         <div class="list-item-body">
-                            📧 ${p.email} | 🏢 ${p.department || 'N/A'} | 💼 ${p.position || 'N/A'} | 📅 ${p.years_of_experience || 0}년
-                            <br><small style="color: #999;">등록일: ${new Date(p.created_at).toLocaleString('ko-KR')}</small>
+                            <small style="color: #999;">등록일: ${new Date(p.created_at).toLocaleString('ko-KR')}</small>
                         </div>
                     </div>
                 `).join('');
@@ -961,10 +940,6 @@
                 
                 document.getElementById('practitioner-id').value = p.id;
                 document.getElementById('practitioner-name').value = p.name;
-                document.getElementById('practitioner-email').value = p.email;
-                document.getElementById('practitioner-department').value = p.department || '';
-                document.getElementById('practitioner-position').value = p.position || '';
-                document.getElementById('practitioner-experience').value = p.years_of_experience || '';
                 document.getElementById('practitioner-modal-title').textContent = '참가자 수정';
             } catch (error) {
                 alert('참가자 정보 로딩 실패');
@@ -976,11 +951,7 @@
             
             const practitionerId = document.getElementById('practitioner-id').value;
             const data = {
-                name: document.getElementById('practitioner-name').value,
-                email: document.getElementById('practitioner-email').value,
-                department: document.getElementById('practitioner-department').value,
-                position: document.getElementById('practitioner-position').value,
-                years_of_experience: parseInt(document.getElementById('practitioner-experience').value) || null
+                name: document.getElementById('practitioner-name').value
             };
             
             try {
@@ -1234,8 +1205,7 @@
                     <h3 style="color: #FA0030; margin-bottom: 20px;">${s.task_title}</h3>
                     
                     <div style="margin-bottom: 20px;">
-                        <strong>참가자:</strong> ${s.practitioner_name} (${s.email})<br>
-                        <strong>부서/직급:</strong> ${s.department || 'N/A'} / ${s.position || 'N/A'}<br>
+                        <strong>참가자:</strong> ${s.practitioner_name}<br>
                         <strong>제출일:</strong> ${new Date(s.created_at).toLocaleString('ko-KR')}<br>
                         <strong>상태:</strong> <span class="badge badge-${s.status}">${getStatusText(s.status)}</span>
                     </div>
@@ -1460,7 +1430,6 @@
                                 <tr>
                                     <th>순위</th>
                                     <th>참가자</th>
-                                    <th>부서/직급</th>
                                     <th>총점</th>
                                     <th>정확성</th>
                                     <th>명확성</th>
@@ -1480,7 +1449,6 @@
                             <tr>
                                 <td class="${rankClass}">${rank}</td>
                                 <td>${item.practitioner_name}</td>
-                                <td>${item.department || 'N/A'} / ${item.position || 'N/A'}</td>
                                 <td><strong>${item.total_score}</strong></td>
                                 <td>${item.accuracy_score}</td>
                                 <td>${item.clarity_score}</td>
