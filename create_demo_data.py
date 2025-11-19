@@ -11,8 +11,8 @@ import os
 from io import BytesIO
 import zipfile
 
-API_BASE = "https://auto-grader-backend-production.up.railway.app"
-# API_BASE = "http://localhost:8000"  # 로컬 테스트
+# API_BASE = "https://auto-grader-backend-production.up.railway.app"
+API_BASE = "http://localhost:8000"  # 로컬 테스트
 
 # 실무자 참가자 데이터
 PARTICIPANTS = [
@@ -373,6 +373,7 @@ def create_demo_competition():
             json={
                 "name": task_data["name"],
                 "description": task_data["description"],
+                "prompt": "당신은 프롬프트 평가 전문가입니다. 제출된 결과물을 정확성, 명확성, 일관성 기준으로 평가하세요.",
                 "requirements": task_data["requirements"],
                 "golden_output": task_data["golden_output"]
             }
