@@ -118,7 +118,7 @@ def init_db():
             practitioner_id INTEGER NOT NULL,
             task_id INTEGER NOT NULL,
             prompt_text TEXT NOT NULL,
-            submission_date TEXT DEFAULT CURRENT_TIMESTAMP,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             score REAL,
             grading_result TEXT,
             graded_at TEXT,
@@ -351,7 +351,7 @@ async def bulk_upload_submissions(
             
             # 제출물 생성
             c.execute("""
-                INSERT INTO submissions (practitioner_id, task_id, prompt_text, submission_date)
+                INSERT INTO submissions (practitioner_id, task_id, prompt_text, created_at)
                 VALUES (?, ?, ?, ?)
             """, (practitioner_id, task_id, prompt, datetime.now().isoformat()))
             
@@ -478,7 +478,7 @@ async def get_submissions(task_id: Optional[int] = None):
                 JOIN practitioners p ON s.practitioner_id = p.id
                 JOIN tasks t ON s.task_id = t.id
                 WHERE s.task_id = ?
-                ORDER BY s.submission_date DESC
+                ORDER BY s.created_at DESC
             """, (task_id,))
         else:
             c.execute("""
@@ -486,7 +486,7 @@ async def get_submissions(task_id: Optional[int] = None):
                 FROM submissions s
                 JOIN practitioners p ON s.practitioner_id = p.id
                 JOIN tasks t ON s.task_id = t.id
-                ORDER BY s.submission_date DESC
+                ORDER BY s.created_at DESC
             """)
         
         submissions = [dict(row) for row in c.fetchall()]
@@ -549,7 +549,7 @@ async def create_submission(submission: SubmissionCreate):
     
     # 제출물 생성
     c.execute("""
-        INSERT INTO submissions (practitioner_id, task_id, prompt_text, submission_date)
+        INSERT INTO submissions (practitioner_id, task_id, prompt_text, created_at)
         VALUES (?, ?, ?, ?)
     """, (submission.practitioner_id, submission.task_id, submission.prompt_text, 
           datetime.now().isoformat()))
@@ -711,10 +711,9 @@ async def grade_submission_task(submission_id: int, submission: dict):
         c = conn.cursor()
         c.execute("""
             UPDATE submissions 
-            SET score = ?, grading_result = ?, graded_at = ?
+            SET grading_result = ?, graded_at = ?
             WHERE id = ?
         """, (
-            result.get('overall_score', 0),
             json.dumps(grading_result, ensure_ascii=False),
             datetime.now().isoformat(),
             submission_id
