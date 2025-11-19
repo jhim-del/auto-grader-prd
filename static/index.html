@@ -1266,24 +1266,34 @@
                 if (s.status === 'completed' && s.grading_result) {
                     const gr = s.grading_result;
                     
+                    // Extract criteria scores from detailed_criteria array
+                    let criteriaScores = {};
+                    if (gr.detailed_criteria && Array.isArray(gr.detailed_criteria)) {
+                        gr.detailed_criteria.forEach(item => {
+                            criteriaScores[item.criterion] = item;
+                        });
+                    }
+                    
+                    // Display criteria dynamically based on what's in the result
+                    html += `<div class="score-breakdown">`;
+                    
+                    if (gr.detailed_criteria && Array.isArray(gr.detailed_criteria)) {
+                        gr.detailed_criteria.forEach(item => {
+                            html += `
+                                <div class="score-item">
+                                    <h4>${item.criterion}</h4>
+                                    <div class="score">${item.score}점</div>
+                                    <p style="font-size: 12px; color: #666; margin-top: 5px;">${item.feedback || ''}</p>
+                                </div>
+                            `;
+                        });
+                    }
+                    
+                    html += `</div>`;
+                    
                     html += `
-                        <div class="score-breakdown">
-                            <div class="score-item accuracy">
-                                <h4>정확성</h4>
-                                <div class="score">${gr.accuracy_score}/50</div>
-                            </div>
-                            <div class="score-item clarity">
-                                <h4>명확성</h4>
-                                <div class="score">${gr.clarity_score}/30</div>
-                            </div>
-                            <div class="score-item consistency">
-                                <h4>일관성</h4>
-                                <div class="score">${gr.consistency_score}/20</div>
-                            </div>
-                        </div>
-                        
                         <div style="text-align: center; margin: 20px 0;">
-                            <h3 style="color: #FA0030;">총점: ${gr.total_score}/100</h3>
+                            <h3 style="color: #FA0030;">총점: ${gr.overall_score}/100</h3>
                         </div>
                     `;
                     
@@ -1323,17 +1333,18 @@
                     
                     html += `
                         <div class="feedback-section">
-                            <h4>📊 정확성 피드백</h4>
-                            <p>${gr.accuracy_feedback || 'N/A'}</p>
+                            <h4>💡 종합 평가</h4>
+                            <p>${gr.final_evaluation || 'N/A'}</p>
                             
-                            <h4>📝 명확성 피드백</h4>
-                            <p>${gr.clarity_feedback || 'N/A'}</p>
+                            <h4>✅ 강점</h4>
+                            <ul>
+                                ${gr.strengths && Array.isArray(gr.strengths) ? gr.strengths.map(s => `<li>${s}</li>`).join('') : '<li>N/A</li>'}
+                            </ul>
                             
-                            <h4>🔄 일관성 피드백</h4>
-                            <p>${gr.consistency_feedback || 'N/A'}</p>
-                            
-                            <h4>💡 종합 피드백</h4>
-                            <p>${gr.overall_feedback || 'N/A'}</p>
+                            <h4>⚠️ 개선점</h4>
+                            <ul>
+                                ${gr.weaknesses && Array.isArray(gr.weaknesses) ? gr.weaknesses.map(w => `<li>${w}</li>`).join('') : '<li>N/A</li>'}
+                            </ul>
                         </div>
                     `;
                 } else if (s.status === 'failed') {
@@ -1472,6 +1483,10 @@
                 `;
                 
                 if (dashboard.leaderboard && dashboard.leaderboard.length > 0) {
+                    // 평가 기준 추출 (동적)
+                    const firstItem = dashboard.leaderboard[0];
+                    const criteriaKeys = firstItem.criteria ? Object.keys(firstItem.criteria) : [];
+                    
                     html += `
                         <h3 style="margin: 30px 0 15px 0; color: #FA0030;">🏆 리더보드</h3>
                         <table class="leaderboard-table">
@@ -1480,9 +1495,14 @@
                                     <th>순위</th>
                                     <th>참가자</th>
                                     <th>총점</th>
-                                    <th>정확성</th>
-                                    <th>명확성</th>
-                                    <th>일관성</th>
+                    `;
+                    
+                    // 동적 헤더 추가
+                    criteriaKeys.forEach(key => {
+                        html += `<th>${key}</th>`;
+                    });
+                    
+                    html += `
                                     <th>채점일</th>
                                     <th>상세</th>
                                 </tr>
@@ -1499,9 +1519,14 @@
                                 <td class="${rankClass}">${rank}</td>
                                 <td>${item.practitioner_name}</td>
                                 <td><strong>${item.total_score}</strong></td>
-                                <td>${item.accuracy_score}</td>
-                                <td>${item.clarity_score}</td>
-                                <td>${item.consistency_score}</td>
+                        `;
+                        
+                        // 동적 평가 기준 점수 추가
+                        criteriaKeys.forEach(key => {
+                            html += `<td>${item.criteria[key] || 0}</td>`;
+                        });
+                        
+                        html += `
                                 <td>${new Date(item.graded_at).toLocaleString('ko-KR')}</td>
                                 <td><button class="btn btn-secondary" onclick="viewSubmissionDetail(${item.submission_id})">상세</button></td>
                             </tr>
