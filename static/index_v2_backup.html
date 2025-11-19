@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Auto-Grader PRD v2.0</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Pretendard', sans-serif; }
+        .tab-active { border-bottom: 3px solid #FA0030; color: #FA0030; }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <!-- 헤더 -->
+    <header class="bg-white shadow">
+        <div class="container mx-auto px-6 py-4">
+            <h1 class="text-2xl font-bold text-gray-800">🎯 Auto-Grader PRD v2.0</h1>
+            <p class="text-sm text-gray-600">프롬프트 경진대회 자동 평가 플랫폼</p>
+        </div>
+    </header>
+
+    <!-- 탭 네비게이션 -->
+    <nav class="bg-white border-b">
+        <div class="container mx-auto px-6">
+            <div class="flex space-x-8">
+                <button class="tab py-4 px-2 tab-active" onclick="showTab('overview')">대회 개요</button>
+                <button class="tab py-4 px-2" onclick="showTab('participants')">참가자</button>
+                <button class="tab py-4 px-2" onclick="showTab('assignments')">과제</button>
+                <button class="tab py-4 px-2" onclick="showTab('submissions')">제출물</button>
+                <button class="tab py-4 px-2" onclick="showTab('grading')">채점</button>
+                <button class="tab py-4 px-2" onclick="showTab('leaderboard')">리더보드</button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 메인 컨텐츠 -->
+    <main class="container mx-auto px-6 py-8">
+        <!-- 대회 개요 탭 -->
+        <div id="tab-overview" class="tab-content">
+            <h2 class="text-xl font-bold mb-4">대회 개요</h2>
+            <div id="competition-info" class="bg-white p-6 rounded-lg shadow">
+                <p class="text-gray-600">로딩 중...</p>
+            </div>
+        </div>
+
+        <!-- 참가자 탭 -->
+        <div id="tab-participants" class="tab-content hidden">
+            <h2 class="text-xl font-bold mb-4">참가자 목록</h2>
+            <div id="participants-list" class="bg-white p-6 rounded-lg shadow">
+                <p class="text-gray-600">로딩 중...</p>
+            </div>
+        </div>
+
+        <!-- 과제 탭 -->
+        <div id="tab-assignments" class="tab-content hidden">
+            <h2 class="text-xl font-bold mb-4">과제 목록</h2>
+            <div id="assignments-list" class="bg-white p-6 rounded-lg shadow">
+                <p class="text-gray-600">로딩 중...</p>
+            </div>
+        </div>
+
+        <!-- 제출물 탭 -->
+        <div id="tab-submissions" class="tab-content hidden">
+            <h2 class="text-xl font-bold mb-4">제출물 목록</h2>
+            <div id="submissions-list" class="bg-white p-6 rounded-lg shadow">
+                <p class="text-gray-600">로딩 중...</p>
+            </div>
+        </div>
+
+        <!-- 채점 탭 -->
+        <div id="tab-grading" class="tab-content hidden">
+            <h2 class="text-xl font-bold mb-4">자동 채점</h2>
+            <div class="bg-white p-6 rounded-lg shadow">
+                <button 
+                    id="start-grading-btn"
+                    onclick="startGrading()" 
+                    class="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-lg font-semibold">
+                    채점 시작
+                </button>
+                <div id="grading-progress" class="mt-4 hidden">
+                    <div class="w-full bg-gray-200 rounded-full h-4">
+                        <div id="progress-bar" class="bg-red-600 h-4 rounded-full" style="width: 0%"></div>
+                    </div>
+                    <p id="progress-text" class="text-sm text-gray-600 mt-2">0/0 (0%)</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 리더보드 탭 -->
+        <div id="tab-leaderboard" class="tab-content hidden">
+            <h2 class="text-xl font-bold mb-4">리더보드</h2>
+            <div id="leaderboard-table" class="bg-white p-6 rounded-lg shadow">
+                <p class="text-gray-600">로딩 중...</p>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // 전역 변수
+        let currentCompetitionId = null;
+        const API_BASE = window.location.origin;
+
+        // 초기화
+        async function init() {
+            try {
+                // 최신 대회 가져오기
+                const resp = await fetch(`${API_BASE}/competitions`);
+                const competitions = await resp.json();
+                
+                if (competitions.length > 0) {
+                    currentCompetitionId = competitions[0].id;
+                    loadCompetitionData();
+                } else {
+                    document.getElementById('competition-info').innerHTML = 
+                        '<p class="text-red-600">대회가 없습니다. create_demo_data.py를 실행하세요.</p>';
+                }
+            } catch (error) {
+                console.error('초기화 실패:', error);
+                document.getElementById('competition-info').innerHTML = 
+                    '<p class="text-red-600">서버 연결 실패</p>';
+            }
+        }
+
+        // 대회 데이터 로드
+        async function loadCompetitionData() {
+            if (!currentCompetitionId) return;
+
+            try {
+                const resp = await fetch(`${API_BASE}/competitions/${currentCompetitionId}`);
+                const data = await resp.json();
+
+                // 대회 개요
+                document.getElementById('competition-info').innerHTML = `
+                    <h3 class="text-lg font-bold mb-2">${data.name}</h3>
+                    <p class="text-gray-600 mb-4">${data.description || ''}</p>
+                    <div class="grid grid-cols-4 gap-4">
+                        <div class="text-center">
+                            <p class="text-3xl font-bold text-red-600">${data.participants.length}</p>
+                            <p class="text-sm text-gray-600">참가자</p>
+                        </div>
+                        <div class="text-center">
+                            <p class="text-3xl font-bold text-blue-600">${data.assignments.length}</p>
+                            <p class="text-sm text-gray-600">과제</p>
+                        </div>
+                        <div class="text-center">
+                            <p class="text-3xl font-bold text-green-600">${data.submissions_stats.total}</p>
+                            <p class="text-sm text-gray-600">제출물</p>
+                        </div>
+                        <div class="text-center">
+                            <p class="text-3xl font-bold text-purple-600">${data.submissions_stats.completed}</p>
+                            <p class="text-sm text-gray-600">채점 완료</p>
+                        </div>
+                    </div>
+                `;
+
+                // 참가자 목록
+                loadParticipants(data.participants);
+
+                // 과제 목록
+                loadAssignments(data.assignments);
+
+                // 제출물 목록
+                loadSubmissions();
+
+                // 리더보드
+                loadLeaderboard();
+
+            } catch (error) {
+                console.error('데이터 로드 실패:', error);
+            }
+        }
+
+        // 참가자 목록
+        function loadParticipants(participants) {
+            const html = `
+                <table class="w-full">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-4 py-2 text-left">이름</th>
+                            <th class="px-4 py-2 text-left">이메일</th>
+                            <th class="px-4 py-2 text-left">부서</th>
+                            <th class="px-4 py-2 text-left">직급</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${participants.map(p => `
+                            <tr class="border-t">
+                                <td class="px-4 py-2">${p.name}</td>
+                                <td class="px-4 py-2">${p.email}</td>
+                                <td class="px-4 py-2">${p.department || '-'}</td>
+                                <td class="px-4 py-2">${p.position || '-'}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+            document.getElementById('participants-list').innerHTML = html;
+        }
+
+        // 과제 목록
+        function loadAssignments(assignments) {
+            const html = assignments.map(a => `
+                <div class="border-b pb-4 mb-4">
+                    <h3 class="font-bold text-lg">${a.name}</h3>
+                    <p class="text-gray-600 text-sm">${a.description || ''}</p>
+                    ${a.input_file_path ? `<p class="text-xs text-blue-600 mt-1">📎 대상 파일: ${a.input_file_path}</p>` : ''}
+                    ${a.golden_output ? '<p class="text-xs text-green-600 mt-1">✅ 정답셋 설정됨</p>' : ''}
+                </div>
+            `).join('');
+            document.getElementById('assignments-list').innerHTML = html;
+        }
+
+        // 제출물 목록
+        async function loadSubmissions() {
+            try {
+                const resp = await fetch(`${API_BASE}/competitions/${currentCompetitionId}/submissions`);
+                const submissions = await resp.json();
+
+                const html = `
+                    <table class="w-full text-sm">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-4 py-2 text-left">참가자</th>
+                                <th class="px-4 py-2 text-left">과제</th>
+                                <th class="px-4 py-2 text-left">상태</th>
+                                <th class="px-4 py-2 text-left">점수</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${submissions.map(s => {
+                                const result = s.grading_result ? JSON.parse(s.grading_result) : null;
+                                return `
+                                <tr class="border-t">
+                                    <td class="px-4 py-2">${s.participant_name}</td>
+                                    <td class="px-4 py-2">${s.assignment_name}</td>
+                                    <td class="px-4 py-2">
+                                        <span class="px-2 py-1 rounded text-xs ${
+                                            s.status === 'completed' ? 'bg-green-100 text-green-800' :
+                                            s.status === 'failed' ? 'bg-red-100 text-red-800' :
+                                            s.status === 'manual_review' ? 'bg-yellow-100 text-yellow-800' :
+                                            'bg-gray-100 text-gray-800'
+                                        }">
+                                            ${s.status}
+                                        </span>
+                                    </td>
+                                    <td class="px-4 py-2">
+                                        ${result ? `${result.total_score}/100` : '-'}
+                                    </td>
+                                </tr>
+                            `}).join('')}
+                        </tbody>
+                    </table>
+                `;
+                document.getElementById('submissions-list').innerHTML = html;
+            } catch (error) {
+                console.error('제출물 로드 실패:', error);
+            }
+        }
+
+        // 채점 시작
+        async function startGrading() {
+            if (!confirm('채점을 시작하시겠습니까? (2-3분 소요)')) return;
+
+            const btn = document.getElementById('start-grading-btn');
+            btn.disabled = true;
+            btn.textContent = '채점 중...';
+
+            document.getElementById('grading-progress').classList.remove('hidden');
+
+            try {
+                const resp = await fetch(`${API_BASE}/competitions/${currentCompetitionId}/grade`, {
+                    method: 'POST'
+                });
+                const result = await resp.json();
+                alert(result.message);
+
+                // 진행률 모니터링 시작
+                monitorGradingProgress();
+            } catch (error) {
+                alert('채점 시작 실패: ' + error);
+                btn.disabled = false;
+                btn.textContent = '채점 시작';
+            }
+        }
+
+        // 진행률 모니터링
+        async function monitorGradingProgress() {
+            const interval = setInterval(async () => {
+                try {
+                    const resp = await fetch(`${API_BASE}/competitions/${currentCompetitionId}/grading_progress`);
+                    const progress = await resp.json();
+
+                    const percent = progress.progress_percent || 0;
+                    document.getElementById('progress-bar').style.width = `${percent}%`;
+                    document.getElementById('progress-text').textContent = 
+                        `${progress.completed}/${progress.total} (${percent}%)`;
+
+                    if (progress.completed === progress.total && progress.total > 0) {
+                        clearInterval(interval);
+                        document.getElementById('start-grading-btn').disabled = false;
+                        document.getElementById('start-grading-btn').textContent = '채점 시작';
+                        alert('채점 완료!');
+                        loadCompetitionData();
+                    }
+                } catch (error) {
+                    console.error('진행률 조회 실패:', error);
+                }
+            }, 3000);
+        }
+
+        // 리더보드
+        async function loadLeaderboard() {
+            try {
+                const resp = await fetch(`${API_BASE}/competitions/${currentCompetitionId}/leaderboard`);
+                const leaderboard = await resp.json();
+
+                const html = `
+                    <table class="w-full">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-4 py-2 text-left">순위</th>
+                                <th class="px-4 py-2 text-left">이름</th>
+                                <th class="px-4 py-2 text-left">부서</th>
+                                <th class="px-4 py-2 text-left">제출</th>
+                                <th class="px-4 py-2 text-left">평균 점수</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${leaderboard.map(entry => `
+                                <tr class="border-t">
+                                    <td class="px-4 py-2 font-bold">${entry.rank}</td>
+                                    <td class="px-4 py-2">${entry.name}</td>
+                                    <td class="px-4 py-2">${entry.department || '-'}</td>
+                                    <td class="px-4 py-2">${entry.completed_submissions}/${entry.total_submissions}</td>
+                                    <td class="px-4 py-2 font-bold text-red-600">
+                                        ${entry.average_score ? entry.average_score.toFixed(1) : '-'}
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+                document.getElementById('leaderboard-table').innerHTML = html;
+            } catch (error) {
+                console.error('리더보드 로드 실패:', error);
+            }
+        }
+
+        // 탭 전환
+        function showTab(tabName) {
+            // 모든 탭 숨기기
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+            // 선택한 탭 보이기
+            document.getElementById(`tab-${tabName}`).classList.remove('hidden');
+
+            // 탭 버튼 스타일
+            document.querySelectorAll('.tab').forEach(el => el.classList.remove('tab-active'));
+            event.target.classList.add('tab-active');
+        }
+
+        // 페이지 로드 시 초기화
+        window.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>
